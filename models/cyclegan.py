@@ -265,8 +265,8 @@ class CycleGan(BaseModel, Model):
 
         self.g_AB_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
         self.g_BA_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-        self.d_A_optimizer = tf.keras.optimizers.Adam(2e-5, beta_1=0.5)
-        self.d_B_optimizer = tf.keras.optimizers.Adam(2e-5, beta_1=0.5)
+        self.d_A_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+        self.d_B_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
     @tf.function
     def train_step(self, real_a: Tensor, real_b: Tensor) -> Tuple[float, ...]:

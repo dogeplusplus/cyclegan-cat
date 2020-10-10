@@ -5,3 +5,5 @@ typing~=3.6.6
 bunch~=1.0.1
 tqdm~=4.36.1
 opencv-python~=3.4.4.19
+wheel~=0.35.1
+numpy~=1.19.2
