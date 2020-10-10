@@ -2,7 +2,7 @@ import json
 from typing import Dict, NoReturn
 from importlib import import_module
 
-from models.base import BaseModel
+from cyclegan.base import BaseModel
 
 
 def json2dict(json_path: str) -> Dict:

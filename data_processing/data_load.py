@@ -35,8 +35,7 @@ def image2example(image_path, target_size):
 def tfrecord_writer(image_paths, target='images.tfrecords', image_size=256, max_images=640):
     images = os.listdir(image_paths)[:max_images]
     logger.info(f'Images Found: {len(images)}')
-    base_dir = os.path.dirname(image_paths)
-    with tf.io.TFRecordWriter(join(base_dir, target)) as writer:
+    with tf.io.TFRecordWriter(target) as writer:
         for image in images:
             feature = image2example(join(image_paths, image), target_size=(image_size, image_size))
             writer.write(feature.SerializeToString())
@@ -109,9 +108,3 @@ def create_dataset(records_a, records_b, validation_split=0.2, width=128):
     val_dataset = val_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     return train_dataset, val_dataset
-
-
-# if __name__ == "__main__":
-#     tfrecord_writer('C:\\Users\\doge\\github\\scrunge-transfer\\data\\horse2zebra\\trainA', 'horses_128.tfrecords', 128)
-#     tfrecord_writer('C:\\Users\\doge\\github\\scrunge-transfer\\data\\horse2zebra\\trainB', 'zebras_128.tfrecords', 128)
-
