@@ -1,5 +1,6 @@
 import os
-import imageio
+
+import cv2
 import logging
 import tensorflow as tf
 
@@ -17,10 +18,11 @@ def _byte_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def image2example(image_path):
-    image = imageio.imread(image_path, as_gray=False)
-    height, width, depth = image.shape
-    image_bytes = open(image_path, 'rb').read()
+def image2example(image_path, target_size):
+    image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    reshaped_image = cv2.resize(image, target_size)
+    height, width, depth = reshaped_image.shape
+    image_bytes = cv2.imencode('.png', reshaped_image)[1].tobytes()
     feature = {
         'image_raw': _byte_feature(image_bytes),
         'height': _int64_feature(height),
@@ -30,13 +32,13 @@ def image2example(image_path):
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def tfrecord_writer(image_paths, target='images.tfrecords', max_images=640):
+def tfrecord_writer(image_paths, target='images.tfrecords', image_size=256, max_images=640):
     images = os.listdir(image_paths)[:max_images]
     logger.info(f'Images Found: {len(images)}')
     base_dir = os.path.dirname(image_paths)
     with tf.io.TFRecordWriter(join(base_dir, target)) as writer:
         for image in images:
-            feature = image2example(join(image_paths, image))
+            feature = image2example(join(image_paths, image), target_size=(image_size, image_size))
             writer.write(feature.SerializeToString())
 
 
@@ -108,6 +110,8 @@ def create_dataset(records_a, records_b, validation_split=0.2, width=128):
 
     return train_dataset, val_dataset
 
-if __name__ == "__main__":
-    tfrecord_writer("data/cat2scrunge/cat_faces", target="cats.tfrecords")
-    tfrecord_writer("data/cat2scrunge/scrunge_faces", target="scrunge.tfrecords")
+
+# if __name__ == "__main__":
+#     tfrecord_writer('C:\\Users\\doge\\github\\scrunge-transfer\\data\\horse2zebra\\trainA', 'horses_128.tfrecords', 128)
+#     tfrecord_writer('C:\\Users\\doge\\github\\scrunge-transfer\\data\\horse2zebra\\trainB', 'zebras_128.tfrecords', 128)
+

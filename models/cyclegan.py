@@ -1,3 +1,4 @@
+import tqdm
 import datetime
 import logging
 import tensorflow as tf
@@ -8,7 +9,7 @@ from tensorflow import Tensor
 from tensorflow.keras.models import Model
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Conv2D, LeakyReLU, Conv2DTranspose, BatchNormalization, ZeroPadding2D, Dropout, \
-    Concatenate, Input, ReLU
+    Concatenate, Input, ReLU, UpSampling2D, MaxPooling2D
 from tensorflow_addons.layers import InstanceNormalization
 from models.base import BaseModel
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 MODEL_CLASS = 'CycleGan'
 
 
-def downsample(filters: int, size: int, norm_type: str = 'batchnorm', apply_norm: bool = True) -> Sequential:
+def downsample(filters: int, size: int, norm_type: str = 'instancenorm', apply_norm: bool = True) -> Sequential:
     """Create downsampling section for the unet
 
     Args:
@@ -31,22 +32,23 @@ def downsample(filters: int, size: int, norm_type: str = 'batchnorm', apply_norm
     initializer = tf.random_normal_initializer(0., 0.02)
 
     result = Sequential()
-    result.add(
-        Conv2D(filters, size, strides=2, padding='same',
-               kernel_initializer=initializer, use_bias=False))
+    for _ in range(2):
+        result.add(
+            Conv2D(filters, size, strides=2, padding='same',
+                   kernel_initializer=initializer, use_bias=False))
 
-    if apply_norm:
-        if norm_type.lower() == 'batchnorm':
-            result.add(BatchNormalization())
-        elif norm_type.lower() == 'instancenorm':
-            result.add(InstanceNormalization())
+        if apply_norm:
+            if norm_type.lower() == 'batchnorm':
+                result.add(BatchNormalization())
+            elif norm_type.lower() == 'instancenorm':
+                result.add(InstanceNormalization())
 
-    result.add(LeakyReLU())
+        result.add(LeakyReLU())
 
     return result
 
 
-def upsample(filters: int, size: int, norm_type: str = 'batchnorm', apply_dropout: bool = False) -> Sequential:
+def upsample(filters: int, size: int, norm_type: str = 'instancenorm', apply_dropout: bool = False) -> Sequential:
     """Upsamples an input.
 
     Args:
@@ -73,66 +75,66 @@ def upsample(filters: int, size: int, norm_type: str = 'batchnorm', apply_dropou
     elif norm_type.lower() == 'instancenorm':
         result.add(InstanceNormalization())
 
+    result.add(ReLU())
+
     if apply_dropout:
         result.add(Dropout(0.5))
-
-    result.add(ReLU())
 
     return result
 
 
-def unet_generator(down_filters: List[int], up_filters: List[int], kernel_size: int, output_channels: int,
-                   norm_type: str = 'batchnorm') -> Model:
-    """Modified u-net generator model (https://arxiv.org/abs/1611.07004).
-
-    Args:
-        down_filters: filters per convolution during downsampling
-        up_filters: filters per convolution during upsampling
-        kernel_size: convolution kernel size
-        output_channels: Output channels
-        norm_type: Type of normalization. Either 'batchnorm' or 'instancenorm'.
-
-    Returns:
-        Generator model
-    """
-    down_stack = [
-        downsample(down_filters[0], kernel_size, apply_norm=False)
-    ]
-    down_stack.extend([downsample(filters, kernel_size) for filters in down_filters[1:]])
-
-    up_stack = [
-        upsample(filters, kernel_size) for filters in up_filters
-    ]
-
+def double_conv(filter: int, kernel_size: int,
+                norm_type: str = 'instancenorm', apply_dropout: bool = False):
+    layers = tf.keras.models.Sequential()
     initializer = tf.random_normal_initializer(0., 0.02)
-    last = Conv2DTranspose(
-        output_channels, 4, strides=2,
-        padding='same', kernel_initializer=initializer,
-        activation='tanh')  # (bs, 256, 256, 3)
+    for _ in range(2):
+        layers.add(Conv2D(filter, kernel_size, strides=1, padding='same',
+                          kernel_initializer=initializer, use_bias=False))
+        if norm_type.lower() == 'batchnorm':
+            layers.add(BatchNormalization())
+        elif norm_type.lower() == 'instancenorm':
+            layers.add(InstanceNormalization())
 
+        layers.add(ReLU())
+        if apply_dropout:
+            layers.add(Dropout(0.5))
+
+    return layers
+
+
+def unet_generator_v2(down_filters: List[int], up_filters: List[int], kernel_size: int, output_channels: int,
+                      norm_type: str = 'instancenorm', apply_dropout: bool = False) -> Model:
     inputs = Input(shape=[None, None, 3])
     x = inputs
-
-    # Downsampling through the model
     skips = []
-    for down in down_stack:
-        x = down(x)
-        skips.append(x)
 
-    skips = reversed(skips[:-1])
+    # Downsampling lasyers
+    for filter in down_filters[:-1]:
+        x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
+        skips.insert(0, x)
+        x = MaxPooling2D()(x)
 
-    # Upsampling and establishing the skip connections
-    for up, skip in zip(up_stack, skips):
-        x = up(x)
-        x = Concatenate()([x, skip])
+    # Bottom section
+    x = double_conv(down_filters[-1], kernel_size, norm_type, apply_dropout)(x)
 
-    x = last(x)
+    # Upsampling section
+    for filter, skip in zip(up_filters, skips):
+        x = UpSampling2D()(x)
+        x = Concatenate()([skip, x])
+        x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
 
-    return Model(inputs=inputs, outputs=x)
+    initializer = tf.random_normal_initializer(0., 0.02)
+    if output_channels:
+        last = Conv2D(output_channels, kernel_size, strides=1, padding='same', kernel_initializer=initializer)(x)
+    else:
+        last = x
+
+    model = tf.keras.models.Model(inputs=inputs, outputs=last)
+    return model
 
 
 def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: int,
-                  norm_type: str = 'batchnorm') -> Model:
+                  norm_type: str = 'instancenorm') -> Model:
     """PatchGan discriminator model (https://arxiv.org/abs/1611.07004).
     Args:
         down_filters: filters per convolution during downsampling
@@ -144,48 +146,20 @@ def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: i
       Discriminator model
     """
 
-    down_stack = [
-        downsample(down_filters[0], kernel_size, apply_norm=False)
-    ]
-    down_stack.extend([downsample(filters, kernel_size) for filters in down_filters[1:]])
-
-    up_stack = [
-        upsample(filters, kernel_size) for filters in up_filters
-    ]
     initializer = tf.random_normal_initializer(0., 0.02)
-    unet_last = Conv2DTranspose(
-        3, 4, strides=2,
-        padding='same', kernel_initializer=initializer,
-        activation='tanh')  # (bs, 256, 256, 3)
-
-    concat = Concatenate()
-
     inputs = Input(shape=[None, None, 3])
     x = inputs
 
-    # Downsampling through the model
-    skips = []
-    for down in down_stack:
-        x = down(x)
-        skips.append(x)
+    unet = unet_generator_v2(down_filters, up_filters, kernel_size, None)
+    x = unet(inputs)
 
-    skips = reversed(skips[:-1])
+    down1 = downsample(64, 4, norm_type, False)(x)
+    down2 = downsample(64, 4, norm_type)(down1)
 
-    # Upsampling and establishing the skip connections
-    for up, skip in zip(up_stack, skips):
-        x = up(x)
-        x = concat([x, skip])
-
-    x = unet_last(x)
-
-    down1 = downsample(64, 4, norm_type, False)(x)  # (bs, 128, 128, 64)
-    down2 = downsample(128, 4, norm_type)(down1)  # (bs, 64, 64, 128)
-    down3 = downsample(256, 4, norm_type)(down2)  # (bs, 32, 32, 256)
-
-    zero_pad1 = ZeroPadding2D()(down3)  # (bs, 34, 34, 256)
+    zero_pad1 = ZeroPadding2D()(down2)
     conv = Conv2D(
         512, 4, strides=1, kernel_initializer=initializer,
-        use_bias=False)(zero_pad1)  # (bs, 31, 31, 512)
+        use_bias=False)(zero_pad1)
 
     if norm_type.lower() == 'batchnorm':
         norm1 = BatchNormalization()(conv)
@@ -194,7 +168,7 @@ def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: i
 
     leaky_relu = LeakyReLU()(norm1)
 
-    zero_pad2 = ZeroPadding2D()(leaky_relu)  # (bs, 33, 33, 512)
+    zero_pad2 = ZeroPadding2D()(leaky_relu)
     last = Conv2D(
         1, 4, strides=1,
         kernel_initializer=initializer)(zero_pad2)  # (bs, 30, 30, 1)
@@ -272,20 +246,22 @@ class CycleGan(BaseModel, Model):
         self.summaries = tf.summary.create_file_writer(
             join(self.model_location, self.model_config.name, 'logs', current_time))
         self.build_models()
-        self.create_checkpoints(join(self.model_location, 'weights'))
+        self.create_checkpoints(join(self.model_location, self.model_config.name, 'weights'))
         self.loss_weights = self.model_config.loss_weights
 
     def build_models(self) -> NoReturn:
         # get model attributes
-        down_filters = getattr(self.model_config, 'down_filters', [64, 128, 256, 512, 512])
-        up_filters = getattr(self.model_config, 'up_filters', [512, 256, 128, 64])
+        generator_down_filters = getattr(self.model_config, 'generator_down_filters')
+        generator_up_filters = getattr(self.model_config, 'generator_up_filters')
+        discriminator_down_filters = getattr(self.model_config, 'discriminator_down_filters')
+        discriminator_up_filters = getattr(self.model_config, 'discriminator_up_filters')
         kernel_size = getattr(self.model_config, 'kernel_size', 4)
 
-        self.g_AB = unet_generator(down_filters, up_filters, kernel_size, 3)
-        self.g_BA = unet_generator(down_filters, up_filters, kernel_size, 3)
+        self.g_AB = unet_generator_v2(generator_down_filters, generator_up_filters, kernel_size, 3)
+        self.g_BA = unet_generator_v2(generator_down_filters, generator_up_filters, kernel_size, 3)
 
-        self.d_A = discriminator(down_filters, up_filters, kernel_size)
-        self.d_B = discriminator(down_filters, up_filters, kernel_size)
+        self.d_A = discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
+        self.d_B = discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
 
         self.g_AB_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
         self.g_BA_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
@@ -312,35 +288,43 @@ class CycleGan(BaseModel, Model):
             disc_fake_a = self.d_A(fake_a, training=True)
             disc_fake_b = self.d_B(fake_b, training=True)
 
-            # TODO: add loss weighting in the generator loss, make it higher potentially
-            gen_AB_loss = generator_loss(disc_fake_b, loss_obj, self.loss_weights['generator'])
-            gen_BA_loss = generator_loss(disc_fake_a, loss_obj, self.loss_weights['generator'])
+            gAB_loss = generator_loss(disc_fake_b, loss_obj, self.loss_weights['generator'])
+            gBA_loss = generator_loss(disc_fake_a, loss_obj, self.loss_weights['generator'])
 
             total_cycle_loss = calc_cycle_loss(real_a, cycled_a, self.loss_weights['cycle']) + calc_cycle_loss(real_b,
                                                                                                                cycled_b,
                                                                                                                self.loss_weights[
                                                                                                                    'cycle'])
 
-            total_g_AB_loss = gen_AB_loss + total_cycle_loss + identity_loss(real_b, same_b, self.loss_weights['identity'])
-            total_g_BA_loss = gen_BA_loss + total_cycle_loss + identity_loss(real_a, same_a, self.loss_weights['identity'])
+            total_gAB_loss = gAB_loss + total_cycle_loss + identity_loss(real_b, same_b,
+                                                                             self.loss_weights['identity'])
+            total_gBA_loss = gBA_loss + total_cycle_loss + identity_loss(real_a, same_a,
+                                                                             self.loss_weights['identity'])
 
-            disc_a_loss = discriminator_loss(disc_real_a, disc_fake_a, loss_obj, self.loss_weights['discriminator'])
-            disc_b_loss = discriminator_loss(disc_real_b, disc_fake_b, loss_obj, self.loss_weights['discriminator'])
+            da_loss = discriminator_loss(disc_real_a, disc_fake_a, loss_obj, self.loss_weights['discriminator'])
+            db_loss = discriminator_loss(disc_real_b, disc_fake_b, loss_obj, self.loss_weights['discriminator'])
 
-        g_AB_gradients = tape.gradient(total_g_AB_loss, self.g_AB.trainable_variables)
-        g_BA_gradients = tape.gradient(total_g_BA_loss, self.g_BA.trainable_variables)
+        g_AB_gradients = tape.gradient(total_gAB_loss, self.g_AB.trainable_variables)
+        g_BA_gradients = tape.gradient(total_gBA_loss, self.g_BA.trainable_variables)
 
-        disc_a_gradients = tape.gradient(disc_a_loss, self.d_A.trainable_variables)
-        disc_b_gradients = tape.gradient(disc_b_loss, self.d_B.trainable_variables)
+        da_gradients = tape.gradient(da_loss, self.d_A.trainable_variables)
+        db_gradients = tape.gradient(db_loss, self.d_B.trainable_variables)
 
         self.g_AB_optimizer.apply_gradients(zip(g_AB_gradients, self.g_AB.trainable_variables))
         self.g_BA_optimizer.apply_gradients(zip(g_BA_gradients, self.g_BA.trainable_variables))
 
-        self.d_A_optimizer.apply_gradients(zip(disc_a_gradients, self.d_A.trainable_variables))
-        self.d_B_optimizer.apply_gradients(zip(disc_b_gradients, self.d_B.trainable_variables))
+        self.d_A_optimizer.apply_gradients(zip(da_gradients, self.d_A.trainable_variables))
+        self.d_B_optimizer.apply_gradients(zip(db_gradients, self.d_B.trainable_variables))
 
-        # TODO: add the discriminator accuracy to tensorboard
-        return (total_g_AB_loss, total_g_BA_loss, disc_a_loss, disc_b_loss)
+        def accuracy(real, fake):
+            predictions = tf.concat([disc_real_a, disc_fake_a], axis=0)
+            labels = tf.concat([tf.ones_like(real, tf.float32), tf.zeros_like(fake, tf.float32)], axis=0)
+            return tf.keras.metrics.binary_accuracy(predictions, labels)
+
+        da_accuracy = accuracy(disc_real_a, disc_fake_a)
+        db_accuracy = accuracy(disc_real_b, disc_fake_b)
+
+        return (total_gAB_loss, total_gBA_loss, da_loss, db_loss, da_accuracy, db_accuracy)
 
     def create_checkpoints(self, checkpoint_path: str) -> NoReturn:
 
@@ -358,60 +342,72 @@ class CycleGan(BaseModel, Model):
 
     def train(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset, epochs: int,
               batch_size: int = 32) -> NoReturn:
-        tensorboard_samples = 9
+        tensorboard_samples = 10
         sample_images = []
 
         metric_names = [
-            'discriminator_a_loss',
-            'discriminator_b_loss',
-            'generator_ab_loss',
-            'generator_ba_loss'
+            'dA_loss',
+            'dB_loss',
+            'gAB_loss',
+            'gBA_loss',
+            'dA_accuracy',
+            'dB_accuracy',
         ]
 
         metrics_dict = {
             m: tf.keras.metrics.Mean(name=m)
             for m in metric_names
         }
+
         val_iter = iter(validation_dataset)
         for _ in range(tensorboard_samples):
             sample_images.append(next(val_iter))
 
         a_samples = tf.stack([s[0] for s in sample_images])
         b_samples = tf.stack([s[1] for s in sample_images])
-
         with self.summaries.as_default():
             tf.summary.image(name='A', data=tf.add(a_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
             tf.summary.image(name='B', data=tf.add(b_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
 
         train_dataset = train_dataset.batch(batch_size)
-        n_batches = sum(1 for _ in train_dataset)
+        training_size = sum(1 for _ in train_dataset)
+        desc = 'Epoch {} training'
         for e in range(epochs):
-            for i, (images_a, images_b) in enumerate(train_dataset):
+            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=200, total=training_size)
+            for i, (images_a, images_b) in enumerate(train_bar):
                 losses = self.train_step(images_a, images_b)
                 self.update_metrics(metrics_dict, losses)
-                self.display_metrics(metrics_dict, e, i + 1, n_batches)
+                self.display_metrics(metrics_dict, train_bar)
+
+            self.write_summaries(e, metrics_dict)
+            if e % 5 == 0:
+                self.write_images(e, a_samples, b_samples, tensorboard_samples)
 
             if e % 20 == 0:
                 self.ckpt_manager.save()
 
-            self.write_summaries(e, metrics_dict, a_samples, b_samples, tensorboard_samples)
-
-    def write_summaries(self, epoch: int, metrics_dict: Dict[str, Tensor], a_samples: Tensor, b_samples: Tensor,
-                        num_samples: int):
+    def write_summaries(self, epoch: int, metrics_dict: Dict[str, Tensor]):
         """Write summaries into tensorboard
 
         Args:
             epoch: epoch number
             metrics_dict: dictionary of metrics
-            a_samples: sample images of class a for tensorboard
-            b_samples: sample images of class b for tensorboard
-            num_samples: number of samples of each class to display
         """
         with self.summaries.as_default():
             for name, metric in metrics_dict.items():
                 tf.summary.scalar(name, metric.result(), step=epoch)
                 metrics_dict[name].reset_states()
 
+    def write_images(self, epoch: int, a_samples: Tensor, b_samples: Tensor, num_samples):
+        """Write summaries into tensorboard
+
+        Args:
+            epoch: epoch number
+            a_samples: sample images of class a for tensorboard
+            b_samples: sample images of class b for tensorboard
+            num_samples: number of samples of each class to display
+        """
+        with self.summaries.as_default():
             prediction_ab = self.g_AB.predict(x=a_samples, batch_size=1)
             prediction_ba = self.g_BA.predict(x=b_samples, batch_size=1)
             tf.summary.image(name='A2B_predictions', data=tf.add(prediction_ab, 1) / 2,
@@ -428,25 +424,19 @@ class CycleGan(BaseModel, Model):
             metrics_dict: dictionary of metrics
             losses: loss values from the training batch
         """
-        metrics_dict['generator_ab_loss'].update_state(losses[0])
-        metrics_dict['generator_ba_loss'].update_state(losses[1])
-        metrics_dict['discriminator_a_loss'].update_state(losses[2])
-        metrics_dict['discriminator_b_loss'].update_state(losses[3])
+        metrics_dict['gAB_loss'].update_state(losses[0])
+        metrics_dict['gBA_loss'].update_state(losses[1])
+        metrics_dict['dA_loss'].update_state(losses[2])
+        metrics_dict['dB_loss'].update_state(losses[3])
+        metrics_dict['dA_accuracy'].update_state(losses[4])
+        metrics_dict['dB_accuracy'].update_state(losses[5])
 
-    def display_metrics(self, metrics_dict: Dict[str, Tensor], epoch: int, iteration: int, total_batches:
-    int) -> NoReturn:
+    def display_metrics(self, metrics_dict: Dict[str, Tensor], progress_bar: tqdm.tqdm) -> NoReturn:
         """Display training progress to the console
         
         Args:
             metrics_dict: dictionary of metrics
-            epoch: epoch number
-            iteration: iteration number
-            total_batches: total number of batches per epoch
+            progress_bar: tqdm progress bar
         """
-        l_da = metrics_dict['discriminator_a_loss'].result()
-        l_db = metrics_dict['discriminator_b_loss'].result()
-        l_gab = metrics_dict['generator_ab_loss'].result()
-        l_gba = metrics_dict['generator_ba_loss'].result()
-        logger.info(
-            f'Epoch {epoch} Batch {iteration}/{total_batches} [DA: {l_da} DB: {l_db}] [GAB: {l_gab} GBA: {l_gba}]'
-        )
+        evaluated_metrics = {k: str(v.result().numpy())[:7] for k, v in metrics_dict.items()}
+        progress_bar.set_postfix(**evaluated_metrics)
