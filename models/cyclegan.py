@@ -171,7 +171,7 @@ def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: i
     zero_pad2 = ZeroPadding2D()(leaky_relu)
     last = Conv2D(
         1, 4, strides=1,
-        kernel_initializer=initializer)(zero_pad2)  # (bs, 30, 30, 1)
+        kernel_initializer=initializer, activation='sigmoid')(zero_pad2)  # (bs, 30, 30, 1)
 
     return Model(inputs=inputs, outputs=last)
 
@@ -317,7 +317,7 @@ class CycleGan(BaseModel, Model):
         self.d_B_optimizer.apply_gradients(zip(db_gradients, self.d_B.trainable_variables))
 
         def accuracy(real, fake):
-            predictions = tf.concat([disc_real_a, disc_fake_a], axis=0)
+            predictions = tf.concat([real, fake], axis=0)
             labels = tf.concat([tf.ones_like(real, tf.float32), tf.zeros_like(fake, tf.float32)], axis=0)
             return tf.keras.metrics.binary_accuracy(predictions, labels)
 
@@ -342,7 +342,7 @@ class CycleGan(BaseModel, Model):
 
     def train(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset, epochs: int,
               batch_size: int = 32) -> NoReturn:
-        tensorboard_samples = 10
+        tensorboard_samples = 8
         sample_images = []
 
         metric_names = [

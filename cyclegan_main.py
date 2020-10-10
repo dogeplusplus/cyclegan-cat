@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     BATCH_SIZE = 2
     EPOCHS = 100
-    train_ds, val_ds = create_dataset('data/horses_128.tfrecords', 'data/zebras_128.tfrecords', width=IMAGE_SIZE)
+    train_ds, val_ds = create_dataset('data/dragonli.tfrecords', 'data/tortie.tfrecords', width=IMAGE_SIZE)
 
     gan.train(
         train_dataset=train_ds,
