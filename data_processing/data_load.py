@@ -18,11 +18,10 @@ def _byte_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def image2example(image_path, target_size):
+def image2example(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    reshaped_image = cv2.resize(image, target_size)
-    height, width, depth = reshaped_image.shape
-    image_bytes = cv2.imencode('.png', reshaped_image)[1].tobytes()
+    height, width, depth = image.shape
+    image_bytes = cv2.imencode('.png', image)[1].tobytes()
     feature = {
         'image_raw': _byte_feature(image_bytes),
         'height': _int64_feature(height),
@@ -32,12 +31,12 @@ def image2example(image_path, target_size):
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def tfrecord_writer(image_paths, target='images.tfrecords', image_size=256, max_images=640):
+def tfrecord_writer(image_paths, target='images.tfrecords', max_images=640):
     images = os.listdir(image_paths)[:max_images]
     logger.info(f'Images Found: {len(images)}')
     with tf.io.TFRecordWriter(target) as writer:
         for image in images:
-            feature = image2example(join(image_paths, image), target_size=(image_size, image_size))
+            feature = image2example(join(image_paths, image))
             writer.write(feature.SerializeToString())
 
 
