@@ -4,11 +4,13 @@ import tensorflow as tf
 
 from typing import NoReturn, Tuple, Dict, List
 from os.path import join
-from tensorflow import Tensor
+from tensorflow import Tensor, add
 from tensorflow.keras.models import Model
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Conv2D, LeakyReLU, BatchNormalization, ZeroPadding2D, Dropout, \
     Concatenate, Input, ReLU, UpSampling2D, MaxPooling2D
+from tensorflow.python.keras.layers import Activation, Conv2DTranspose, Add
+from tensorflow.keras.layers import Layer, InputSpec
 from tensorflow_addons.layers import InstanceNormalization
 from cyclegan.base import BaseModel
 
@@ -105,8 +107,8 @@ def unet_generator(down_filters: List[int], up_filters: List[int], kernel_size: 
     return model
 
 
-def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: int,
-                  norm_type: str = 'instancenorm') -> Model:
+def unet_discriminator(down_filters: List[int], up_filters: List[int], kernel_size: int,
+                       norm_type: str = 'instancenorm') -> Model:
     """PatchGan discriminator model (https://arxiv.org/abs/1611.07004).
     Args:
         down_filters: filters per convolution during downsampling
@@ -120,7 +122,6 @@ def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: i
 
     initializer = tf.random_normal_initializer(0., 0.02)
     inputs = Input(shape=[None, None, 3])
-    x = inputs
 
     unet = unet_generator(down_filters, up_filters, kernel_size, None)
     x = unet(inputs)
@@ -147,6 +148,94 @@ def discriminator(down_filters: List[int], up_filters: List[int], kernel_size: i
 
     return Model(inputs=inputs, outputs=last)
 
+def simple_discriminator(down_filters: List[int], kernel_size: int, norm_type: str = 'instancenorm') -> Model:
+    input = Input([None, None, 3])
+
+    x = input
+    initializer = tf.random_normal_initializer(0., 0.02)
+    for filter in down_filters:
+        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)(x)
+        if norm_type == 'instancenorm':
+            x = InstanceNormalization(center=False, scale=False)(x)
+        else:
+            x = BatchNormalization(center=False, scale=False)(x)
+        x = LeakyReLU(0.2)(x)
+
+    output = Conv2D(1, kernel_size, strides=1, padding='same', kernel_initializer=initializer)(x)
+
+    return Model(input, output)
+
+class ReflectionPadding2D(Layer):
+    def __init__(self, padding=(1, 1), **kwargs):
+        self.padding = tuple(padding)
+        self.input_spec = [InputSpec(ndim=4)]
+        super(ReflectionPadding2D, self).__init__(**kwargs)
+
+    def compute_output_shape(self, s):
+        """ If you are using "channels_last" configuration"""
+        return (s[0], s[1] + 2 * self.padding[0], s[2] + 2 * self.padding[1], s[3])
+
+    def call(self, x, mask=None):
+        w_pad,h_pad = self.padding
+        return tf.pad(x, [[0,0], [h_pad,h_pad], [w_pad,w_pad], [0,0] ], 'REFLECT')
+
+def resnet_generator(filters: int):
+    initializer = tf.random_normal_initializer(0., 0.02)
+
+    def residual(layer, filters):
+        x = ReflectionPadding2D(padding=(1,1))(layer)
+        x = Conv2D(filters, kernel_size=3, strides=1, padding='valid', kernel_initializer=initializer)(x)
+        x = InstanceNormalization(center=False, scale=False)(x)
+        x = ReLU()(x)
+
+        x = ReflectionPadding2D(padding=(1,1))(x)
+        x = Conv2D(filters, kernel_size=3, strides=1, padding='valid', kernel_initializer=initializer)(x)
+        x = InstanceNormalization(center=False, scale=False)(x)
+        return Add()([layer, x])
+
+    def conv7s1(layer_input, filters, final):
+        x = ReflectionPadding2D(padding=(3,3))(layer_input)
+        x = Conv2D(filters, kernel_size=7, strides=1, padding='valid', kernel_initializer=initializer)(x)
+        if final:
+            x = Activation('tanh')(x)
+        else:
+            x = InstanceNormalization(center=False, scale=False)(x)
+            x = Activation('relu')(x)
+        return x
+
+    def downsample(layer, filters):
+        x = Conv2D(filters, kernel_size=3, strides=2, padding='same', kernel_initializer=initializer)(layer)
+        x = InstanceNormalization(center=False, scale=False)(x)
+        x = Activation('relu')(x)
+        return x
+
+    def upsample(layer, filters):
+        x = Conv2DTranspose(filters, kernel_size=3, strides=2, padding='same', kernel_initializer=initializer)(layer)
+        x = InstanceNormalization(center=False, scale=False)(x)
+        x = Activation('relu')(x)
+        return x
+
+    input = Input([None, None, 3])
+    x = input
+
+    x = conv7s1(x, filters, False)
+    x = downsample(x, filters * 2)
+    x = downsample(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = residual(x, filters * 4)
+    x = upsample(x, filters*2)
+    x = upsample(x, filters)
+    x = conv7s1(x, 3, True)
+    output = x
+
+    return Model(input, output)
 
 class CycleGan(BaseModel, Model):
     def __init__(self, model_config: Dict):
@@ -169,11 +258,17 @@ class CycleGan(BaseModel, Model):
         discriminator_up_filters = getattr(self.model_config, 'discriminator_up_filters')
         kernel_size = getattr(self.model_config, 'kernel_size', 4)
 
-        self.g_AB = unet_generator(generator_down_filters, generator_up_filters, kernel_size, 3)
-        self.g_BA = unet_generator(generator_down_filters, generator_up_filters, kernel_size, 3)
-
-        self.d_A = discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
-        self.d_B = discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
+        # TODO: clean up the generator and discriminator code to make it work for all combinations
+        # self.g_AB = unet_generator(generator_down_filters, generator_up_filters, kernel_size, 3)
+        # self.g_BA = unet_generator(generator_down_filters, generator_up_filters, kernel_size, 3)
+        # self.d_A = unet_discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
+        # self.d_B = unet_discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
+        self.g_AB = resnet_generator(32)
+        self.g_BA = resnet_generator(32)
+        self.d_A = simple_discriminator([32, 32, 64, 64], 4)
+        self.d_B = simple_discriminator([32, 32, 64, 64], 4)
+        # self.d_A = unet_discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
+        # self.d_B = unet_discriminator(discriminator_down_filters, discriminator_up_filters, kernel_size)
 
         self.g_AB_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
         self.g_BA_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)

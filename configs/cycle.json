@@ -1,5 +1,5 @@
 {
-  "name": "horse2zebra",
+  "name": "sam2nyx_resnet_simple_256",
   "type": "cyclegan",
   "location": "model_instances",
   "generator_down_filters": [

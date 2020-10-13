@@ -7,14 +7,14 @@ from model_processing.load_model import json2dict
 logging.basicConfig(level=logging.INFO)
 
 if __name__ == "__main__":
-    IMAGE_SIZE = 128
+    IMAGE_SIZE = 256
     gan = CycleGan(bunch.Bunch(json2dict("configs/cycle.json")))
 
     # tfrecord_writer('data/apple2orange/trainA', 'data/apples.tfrecords')
     # tfrecord_writer('data/apple2orange/trainB', 'data/oranges.tfrecords')
-    BATCH_SIZE = 4
+    BATCH_SIZE = 2
     EPOCHS = 100
-    train_ds, val_ds = create_dataset('data/horses.tfrecords', 'data/zebras.tfrecords', width=IMAGE_SIZE)
+    train_ds, val_ds = create_dataset('data/dragonli.tfrecords', 'data/tortie.tfrecords', width=IMAGE_SIZE)
 
     gan.train(
         train_dataset=train_ds,
