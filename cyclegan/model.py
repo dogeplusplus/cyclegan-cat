@@ -1,248 +1,26 @@
-import tqdm
 import logging
-import tensorflow as tf
-
-from typing import NoReturn, Dict, List
 from os.path import join
+from typing import NoReturn, Dict
 
+import tensorflow as tf
+import tqdm
 from bunch import Bunch
 from tensorflow import Tensor
 from tensorflow.keras.models import Model
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Conv2D, LeakyReLU, BatchNormalization, ZeroPadding2D, Dropout, \
-    Concatenate, Input, ReLU, UpSampling2D, MaxPooling2D
-from tensorflow.python.keras.layers import Activation, Conv2DTranspose, Add
-from tensorflow.keras.layers import Layer, InputSpec
-from tensorflow_addons.layers import InstanceNormalization
 
 from cyclegan.losses import calc_cycle_loss, identity_loss, discriminator_loss, generator_loss
 from cyclegan.optimizers import get_optimizer
-from model_processing.load_model import dict2json
+from cyclegan.unet import unet_discriminator, unet_generator
+from model_processing.load_model import namespace2yaml
 
 logger = logging.getLogger(__name__)
-MODEL_CLASS = 'CycleGan'
+
 
 def accuracy(real, fake):
     predictions = tf.cast(tf.concat([real, fake], axis=0) > 0.5, tf.float32)
     labels = tf.concat([tf.ones_like(real), tf.zeros_like(fake, tf.float32)], axis=0)
     acc = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), tf.float32))
     return acc
-
-
-def downsample(filters: int, size: int, norm_type: str = 'instancenorm', apply_norm: bool = True) -> Sequential:
-    """Create downsampling section for the unet
-
-    Args:
-        filters: filters in the convolution
-        size: kernel size
-        norm_type: type of normalization on the outputs
-        apply_norm: flag to apply normalization
-
-    Returns:
-        Downsampling layers as a submodel
-    """
-    initializer = tf.random_normal_initializer(0., 0.02)
-
-    result = Sequential()
-    for _ in range(2):
-        result.add(
-            Conv2D(filters, size, strides=2, padding='same',
-                   kernel_initializer=initializer, use_bias=False))
-
-        if apply_norm:
-            if norm_type.lower() == 'batchnorm':
-                result.add(BatchNormalization())
-            elif norm_type.lower() == 'instancenorm':
-                result.add(InstanceNormalization())
-
-        result.add(LeakyReLU())
-
-    return result
-
-
-def double_conv(filter: int, kernel_size: int,
-                norm_type: str = 'instancenorm', apply_dropout: bool = False):
-    layers = tf.keras.models.Sequential()
-    initializer = tf.random_normal_initializer(0., 0.02)
-    for _ in range(2):
-        layers.add(Conv2D(filter, kernel_size, strides=1, padding='same',
-                          kernel_initializer=initializer, use_bias=False))
-        if norm_type.lower() == 'batchnorm':
-            layers.add(BatchNormalization())
-        elif norm_type.lower() == 'instancenorm':
-            layers.add(InstanceNormalization())
-
-        layers.add(ReLU())
-        if apply_dropout:
-            layers.add(Dropout(0.5))
-
-    return layers
-
-
-def unet_generator(filters: List[int], kernel_sizes: List[int], output_channels: int,
-                   norm_type: str = 'instancenorm', apply_dropout: bool = False) -> Model:
-    inputs = Input(shape=[None, None, 3])
-    x = inputs
-    skips = []
-
-    down_filters = filters
-    up_filters = filters[::-1][:-1]
-    # Downsampling layers
-    for filter, kernel_size in list(zip(down_filters, kernel_sizes))[:-1]:
-        x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
-        skips.insert(0, x)
-        x = MaxPooling2D()(x)
-
-    # Bottom section
-    x = double_conv(down_filters[-1], kernel_sizes[-1], norm_type, apply_dropout)(x)
-
-    # Upsampling section
-    for filter, skip, kernel_size in zip(up_filters, skips, kernel_sizes[:0:-1]):
-        x = UpSampling2D()(x)
-        x = Concatenate()([skip, x])
-        x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
-
-    initializer = tf.random_normal_initializer(0., 0.02)
-    if output_channels:
-        last = Conv2D(output_channels, kernel_size, strides=1, padding='same', kernel_initializer=initializer)(x)
-    else:
-        last = x
-
-    model = tf.keras.models.Model(inputs=inputs, outputs=last)
-    return model
-
-
-def unet_discriminator(filters: List[int], kernel_sizes: List[int],
-                       norm_type: str = 'instancenorm') -> Model:
-    """PatchGan discriminator model (https://arxiv.org/abs/1611.07004).
-    Args:
-        filters: filters per convolution
-        kernel_size: convolution kernel size
-        norm_type: Type of normalization. Either 'batchnorm' or 'instancenorm'.
-
-    Returns:
-      Discriminator model
-    """
-
-    initializer = tf.random_normal_initializer(0., 0.02)
-    inputs = Input(shape=[None, None, 3])
-
-    unet = unet_generator(filters, kernel_sizes, None)
-    x = unet(inputs)
-
-    down1 = downsample(32, 4, norm_type, False)(x)
-    down2 = downsample(32, 4, norm_type)(down1)
-
-    zero_pad1 = ZeroPadding2D()(down2)
-    conv = Conv2D(
-        64, 4, strides=1, kernel_initializer=initializer,
-        use_bias=False)(zero_pad1)
-
-    if norm_type.lower() == 'batchnorm':
-        norm1 = BatchNormalization()(conv)
-    elif norm_type.lower() == 'instancenorm':
-        norm1 = InstanceNormalization()(conv)
-
-    leaky_relu = LeakyReLU()(norm1)
-
-    zero_pad2 = ZeroPadding2D()(leaky_relu)
-    last = Conv2D(
-        1, 4, strides=1,
-        kernel_initializer=initializer, activation='sigmoid')(zero_pad2)  # (bs, 30, 30, 1)
-
-    return Model(inputs=inputs, outputs=last)
-
-
-def simple_discriminator(down_filters: List[int], kernel_size: int, norm_type: str = 'instancenorm') -> Model:
-    input = Input([None, None, 3])
-
-    x = input
-    initializer = tf.random_normal_initializer(0., 0.02)
-    for filter in down_filters:
-        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)(x)
-        if norm_type == 'instancenorm':
-            x = InstanceNormalization(center=False, scale=False)(x)
-        else:
-            x = BatchNormalization(center=False, scale=False)(x)
-        x = LeakyReLU(0.2)(x)
-
-    output = Conv2D(1, kernel_size, strides=1, padding='same', kernel_initializer=initializer)(x)
-
-    return Model(input, output)
-
-
-class ReflectionPadding2D(Layer):
-    def __init__(self, padding=(1, 1), **kwargs):
-        self.padding = tuple(padding)
-        self.input_spec = [InputSpec(ndim=4)]
-        super(ReflectionPadding2D, self).__init__(**kwargs)
-
-    def compute_output_shape(self, s):
-        """ If you are using "channels_last" configuration"""
-        return (s[0], s[1] + 2 * self.padding[0], s[2] + 2 * self.padding[1], s[3])
-
-    def call(self, x, mask=None):
-        w_pad, h_pad = self.padding
-        return tf.pad(x, [[0, 0], [h_pad, h_pad], [w_pad, w_pad], [0, 0]], 'REFLECT')
-
-
-def resnet_generator(filters: int):
-    initializer = tf.random_normal_initializer(0., 0.02)
-
-    def residual(layer, filters):
-        x = ReflectionPadding2D(padding=(1, 1))(layer)
-        x = Conv2D(filters, kernel_size=3, strides=1, padding='valid', kernel_initializer=initializer)(x)
-        x = InstanceNormalization(center=False, scale=False)(x)
-        x = ReLU()(x)
-
-        x = ReflectionPadding2D(padding=(1, 1))(x)
-        x = Conv2D(filters, kernel_size=3, strides=1, padding='valid', kernel_initializer=initializer)(x)
-        x = InstanceNormalization(center=False, scale=False)(x)
-        return Add()([layer, x])
-
-    def conv7s1(layer_input, filters, final):
-        x = ReflectionPadding2D(padding=(3, 3))(layer_input)
-        x = Conv2D(filters, kernel_size=7, strides=1, padding='valid', kernel_initializer=initializer)(x)
-        if final:
-            x = Activation('tanh')(x)
-        else:
-            x = InstanceNormalization(center=False, scale=False)(x)
-            x = Activation('relu')(x)
-        return x
-
-    def downsample(layer, filters):
-        x = Conv2D(filters, kernel_size=3, strides=2, padding='same', kernel_initializer=initializer)(layer)
-        x = InstanceNormalization(center=False, scale=False)(x)
-        x = Activation('relu')(x)
-        return x
-
-    def upsample(layer, filters):
-        x = Conv2DTranspose(filters, kernel_size=3, strides=2, padding='same', kernel_initializer=initializer)(layer)
-        x = InstanceNormalization(center=False, scale=False)(x)
-        x = Activation('relu')(x)
-        return x
-
-    input = Input([None, None, 3])
-    x = input
-
-    x = conv7s1(x, filters, False)
-    x = downsample(x, filters * 2)
-    x = downsample(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = residual(x, filters * 4)
-    x = upsample(x, filters * 2)
-    x = upsample(x, filters)
-    x = conv7s1(x, 3, True)
-    output = x
-
-    return Model(input, output)
 
 
 class CycleGan(Model):
@@ -259,27 +37,29 @@ class CycleGan(Model):
         if self.model_config.new:
             self.build_models()
             self.model_config.new = False
-            dict2json(self.model_config, join(self.model_location, self.model_config.name, 'model_config.json'))
+            namespace2yaml(join(self.model_location, self.model_config.name, 'model_config.yaml'), self.model_config)
         else:
             self.load_model()
 
     def build_models(self) -> NoReturn:
         # get model attributes
-        generator_filters = self.model_config.generator['filters']
-        discriminator_filters = self.model_config.discriminator['filters']
-        gen_kernel_size = self.model_config.generator['kernels']
-        disc_kernel_size = self.model_config.discriminator['kernels']
+        gen_config = self.model_config.generator
+        generator_filters = gen_config['filters']
+        gen_kernel_size = gen_config['kernels']
+        gen_expansion = gen_config['expansion']
+        gen_norm = gen_config['normalization']
+
+        disc_config = self.model_config.discriminator
+        disc_filters = disc_config['filters']
+        disc_kernel_size = disc_config['kernels']
+        disc_expansion = disc_config['expansion']
+        disc_norm = disc_config['normalization']
 
         # TODO: clean up the generator and discriminator code to make it work for all combinations
-        self.g_AB = unet_generator(generator_filters, gen_kernel_size, 3)
-        self.g_BA = unet_generator(generator_filters, gen_kernel_size, 3)
-        # self.g_AB = resnet_generator(64)
-        # self.g_BA = resnet_generator(64)
-        # self.d_A = simple_discriminator([32, 32, 64, 64], 4)
-        # self.d_B = simple_discriminator([32, 32, 64, 64], 4)
-        self.d_A = unet_discriminator(discriminator_filters, disc_kernel_size)
-        self.d_B = unet_discriminator(discriminator_filters, disc_kernel_size)
-
+        self.g_AB = unet_generator(generator_filters, gen_kernel_size, 3, norm_type=gen_norm, expansion=gen_expansion)
+        self.g_BA = unet_generator(generator_filters, gen_kernel_size, 3, norm_type=gen_norm, expansion=gen_expansion)
+        self.d_A = unet_discriminator(disc_filters, disc_kernel_size, norm_type=disc_norm, expansion=disc_expansion)
+        self.d_B = unet_discriminator(disc_filters, disc_kernel_size, norm_type=disc_norm, expansion=disc_expansion)
 
     @tf.function
     def validate_step(self, real_a: Tensor, real_b: Tensor, training: bool = False) -> Dict:
@@ -349,7 +129,8 @@ class CycleGan(Model):
         self.d_B_optimizer.apply_gradients(zip(db_gradients, self.d_B.trainable_variables))
         return metrics
 
-    def train(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset, training_config: Bunch) -> NoReturn:
+    def train(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset,
+              training_config: Bunch) -> NoReturn:
         self.g_AB_optimizer = get_optimizer(training_config.g_opt)
         self.g_BA_optimizer = get_optimizer(training_config.g_opt)
         self.d_A_optimizer = get_optimizer(training_config.d_opt)
@@ -398,7 +179,7 @@ class CycleGan(Model):
         desc = 'Epoch {} training'
         val_desc = 'Epoch {} validation'
         for e in range(epochs):
-            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=150, total=training_size)
+            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=200, total=training_size)
             for i, (images_a, images_b) in enumerate(train_bar):
                 losses = self.train_step(images_a, images_b)
                 self.update_metrics(train_metrics_dict, losses)
@@ -412,7 +193,7 @@ class CycleGan(Model):
             if e % save_model_every == 0:
                 # self.save_model()
                 pass
-            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=150, total=validation_size)
+            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=200, total=validation_size)
             for i, (images_a, images_b) in enumerate(val_bar):
                 losses = self.validate_step(images_a, images_b, training=False)
                 self.update_metrics(validation_metrics_dict, losses)

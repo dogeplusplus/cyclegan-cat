@@ -21,6 +21,16 @@ def yaml2namespace(yaml_path: str) -> Bunch:
     model_config = Bunch(model_config_dict)
     return model_config
 
+def namespace2yaml(yaml_path: str, namespace: Bunch) -> NoReturn:
+    """Save the YAML file on disk
+
+    Args:
+        yaml_path: path to save the yaml file
+        namespace: YAML to serialize
+    """
+    with open(yaml_path, 'w') as f:
+        yaml.dump(namespace, f)
+
 def json2dict(json_path: str) -> Dict:
     """Read the json into a dictionary
 

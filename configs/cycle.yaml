@@ -1,4 +1,4 @@
-name: sam2nyx_resnet
+name: sam2nyx_unet_256
 new: true
 location: model_instances
 generator:
@@ -12,15 +12,19 @@ generator:
     - 3
     - 3
     - 3
+  expansion: transpose
+  normalization: instance
 discriminator:
   filters:
     - 32
     - 32
-    - 64
+    - 32
   kernels:
     - 7
     - 5
     - 3
+  expansion: transpose
+  normalization: instance
 loss_weights:
   cycle: 4
   identity: 1
