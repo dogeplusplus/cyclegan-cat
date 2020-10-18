@@ -1,0 +1,28 @@
+name: sam2nyx_resnet
+new: true
+location: model_instances
+generator:
+  filters:
+    - 32
+    - 32
+    - 64
+    - 64
+  kernels:
+    - 3
+    - 3
+    - 3
+    - 3
+discriminator:
+  filters:
+    - 32
+    - 32
+    - 64
+  kernels:
+    - 7
+    - 5
+    - 3
+loss_weights:
+  cycle: 4
+  identity: 1
+  generator: 1
+  discriminator: 1

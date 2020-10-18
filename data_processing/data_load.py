@@ -2,6 +2,7 @@ import os
 
 import cv2
 import logging
+import numpy as np
 import tensorflow as tf
 
 from os.path import join
@@ -18,8 +19,7 @@ def _byte_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def image2example(image_path):
-    image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+def image2example(image: np.array) -> tf.train.Example:
     height, width, depth = image.shape
     image_bytes = cv2.imencode('.png', image)[1].tobytes()
     feature = {
@@ -31,12 +31,15 @@ def image2example(image_path):
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def tfrecord_writer(image_paths, target='images.tfrecords', max_images=640):
+def tfrecord_writer(image_paths: str, target: str = 'images.tfrecords', max_images: int = 640, image_size: int = None):
     images = os.listdir(image_paths)[:max_images]
     logger.info(f'Images Found: {len(images)}')
     with tf.io.TFRecordWriter(target) as writer:
         for image in images:
-            feature = image2example(join(image_paths, image))
+            img = cv2.imread(join(image_paths, image), cv2.IMREAD_COLOR)
+            if image_size:
+                cv2.resize(img, (image_size, image_size))
+            feature = image2example(img)
             writer.write(feature.SerializeToString())
 
 
