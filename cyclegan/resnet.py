@@ -1,10 +1,10 @@
-from typing import List
+from typing import List, Dict
 
 import tensorflow as tf
 from tensorflow.python.keras import Input
-from tensorflow.python.keras.layers import Conv2D, ReLU, Add, Activation, Conv2DTranspose, BatchNormalization, LeakyReLU
+from tensorflow.python.keras.layers import Conv2D, ReLU, Add, Activation, Conv2DTranspose, BatchNormalization, LeakyReLU, Layer
 from tensorflow.python.keras.models import Model
-from tensorflow.python.layers.base import Layer, InputSpec
+from tensorflow.python.layers.base import InputSpec
 from tensorflow_addons.layers import InstanceNormalization
 
 
@@ -60,7 +60,8 @@ def upsample(layer, filters, initializer):
     return x
 
 
-def resnet_generator(filters: int):
+def resnet_generator(config: Dict):
+    filters = config['filters']
     input = Input([None, None, 3])
     initializer = tf.random_normal_initializer(0., 0.02)
     x = input
@@ -83,8 +84,10 @@ def resnet_generator(filters: int):
 
     return Model(input, output)
 
-
-def simple_discriminator(down_filters: List[int], kernel_size: int, norm_type: str = 'instancenorm') -> Model:
+def simple_discriminator(config: Dict) -> Model:
+    down_filters = config['filters']
+    kernel_size = config['kernels']
+    norm_type = config['normalization']
     input = Input([None, None, 3])
 
     x = input

@@ -1,9 +1,9 @@
 import tensorflow as tf
-from typing import List
+from typing import List, Dict
 
 from tensorflow.python.keras import Input
 from tensorflow.python.keras.layers import MaxPooling2D, UpSampling2D, Conv2DTranspose, BatchNormalization, LeakyReLU, \
-    Concatenate, Conv2D, Dropout
+    Concatenate, Conv2D, Dropout, Activation
 from tensorflow.python.keras.models import Model
 from tensorflow_addons.layers import InstanceNormalization
 
@@ -27,8 +27,57 @@ def double_conv(filter: int, kernel_size: int,
     return layers
 
 
-def unet_generator(filters: List[int], kernel_sizes: List[int], output_channels: int,
-                   norm_type: str = 'instancenorm', apply_dropout: bool = False, expansion='upsample') -> Model:
+def strided_unet(config: Dict) -> Model:
+    filters = config['filters']
+    kernel_sizes = config['kernels']
+    norm_type = config['normalization']
+    output_channels = config['output_channels']
+    final_activation = config['final_activation']
+
+    initializer = tf.random_normal_initializer(0., 0.02)
+    skips = []
+    inputs = Input(shape=[None, None, 3])
+    x = inputs
+
+    down_filters = filters
+    up_filters = filters[::-1][:-1]
+    for filter, kernel_size in list(zip(down_filters, kernel_sizes))[:-1]:
+        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)
+        if norm_type == 'instancenorm':
+            x = InstanceNormalization()(x)
+        else:
+            x = BatchNormalization()(x)
+
+        x = LeakyReLU(0.2)(x)
+        skips.insert(0, x)
+
+    x = Conv2D(filters[-1], kernel_sizes[-1], strides=2, padding='same', kernel_initializer=initializer)(x)
+
+    for filter, skip, kernel_size in zip(up_filters, skips, kernel_sizes[:0:-1]):
+        x = Conv2DTranspose(filter, kernel_size=kernel_size, padding='same', strides=2, kernel_initializer=initializer)(
+            x)
+        x = Concatenate()([skip, x])
+        if norm_type == 'instancenorm':
+            x = InstanceNormalization()(x)
+        else:
+            x = BatchNormalization()(x)
+
+        x = LeakyReLU(0.2)(x)
+
+    last = Conv2DTranspose(output_channels, 4, strides=2, padding='same', kernel_initializer=initializer,
+                           activation=final_activation)
+    return Model(inputs, last)
+
+
+def unet_generator(config: Dict) -> Model:
+    filters = config['filters']
+    kernel_sizes = config['kernels']
+    expansion = config['expansion']
+    norm_type = config['normalization']
+    apply_dropout = config['dropout']
+    output_channels = config['output_channels']
+    final_activation = config['final_activation']
+
     initializer = tf.random_normal_initializer(0., 0.02)
     skips = []
     inputs = Input(shape=[None, None, 3])
@@ -60,34 +109,7 @@ def unet_generator(filters: List[int], kernel_sizes: List[int], output_channels:
         x = Concatenate()([skip, x])
         x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
 
-    if output_channels:
-        last = Conv2D(output_channels, kernel_size=1, strides=1, padding='same', kernel_initializer=initializer)(x)
-    else:
-        last = x
-
+    x = Conv2D(output_channels, kernel_size=1, strides=1, padding='same')(x)
+    last = Activation(final_activation)(x)
     model = tf.keras.models.Model(inputs=inputs, outputs=last)
     return model
-
-
-def unet_discriminator(filters: List[int], kernel_sizes: List[int],
-                       norm_type: str = 'instancenorm', expansion='upsample') -> Model:
-    """PatchGan discriminator model (https://arxiv.org/abs/1611.07004).
-    Args:
-        filters: filters per convolution
-        kernel_size: convolution kernel size
-        norm_type: Type of normalization. Either 'batchnorm' or 'instancenorm'.
-
-    Returns:
-      Discriminator model
-    """
-
-    initializer = tf.random_normal_initializer(0., 0.02)
-    inputs = Input(shape=[None, None, 3])
-
-    unet = unet_generator(filters, kernel_sizes, None, norm_type, expansion)
-    x = unet(inputs)
-    last = Conv2D(
-        1, 4, strides=1,
-        kernel_initializer=initializer, activation='sigmoid')(x)  # (bs, 30, 30, 1)
-
-    return Model(inputs=inputs, outputs=last)

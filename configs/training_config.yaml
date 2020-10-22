@@ -1,13 +1,13 @@
 epochs: 100
-batch_size: 4
-image_size: 256
+batch_size: 2
+image_size: 128
 g_opt:
   name: adam
-  learning_rate: 0.0001
+  learning_rate: 0.0002
   beta_1: 0.5
 d_opt:
   name: adam
-  learning_rate: 0.001
+  learning_rate: 0.0002
   beta_1: 0.5
 summary:
   samples: 8

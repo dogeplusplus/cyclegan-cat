@@ -1,20 +1,25 @@
-name: sam2nyx_unet_256
+name: cat2scrunge
 new: true
 location: model_instances
 generator:
+  type: resnet_generator
   filters:
     - 32
     - 32
     - 64
     - 64
   kernels:
-    - 3
-    - 3
-    - 3
-    - 3
-  expansion: transpose
-  normalization: instance
+    - 4
+    - 4
+    - 4
+    - 4
+  output_channels: 3
+  expansion: upsample
+  normalization: instancenorm
+  dropout: False
+  final_activation: tanh
 discriminator:
+  type: unet_generator
   filters:
     - 32
     - 32
@@ -23,10 +28,13 @@ discriminator:
     - 7
     - 5
     - 3
-  expansion: transpose
-  normalization: instance
+  output_channels: 1
+  expansion: upsample
+  normalization: instancenorm
+  dropout: False
+  final_activation: sigmoid
 loss_weights:
-  cycle: 4
-  identity: 1
-  generator: 1
-  discriminator: 1
+  cycle: 2.0
+  identity: 0.5
+  generator: 0.5
+  discriminator: 1.0

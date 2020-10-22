@@ -10,10 +10,26 @@ from tensorflow.keras.models import Model
 
 from cyclegan.losses import calc_cycle_loss, identity_loss, discriminator_loss, generator_loss
 from cyclegan.optimizers import get_optimizer
-from cyclegan.unet import unet_discriminator, unet_generator
+from cyclegan.resnet import simple_discriminator, resnet_generator
+from cyclegan.unet import unet_generator, strided_unet
 from model_processing.load_model import namespace2yaml
 
 logger = logging.getLogger(__name__)
+
+
+def create_model(config: Dict) -> Model:
+    chosen_type = config['type']
+
+    MODEL_FUNCTION = [
+        simple_discriminator,
+        resnet_generator,
+        unet_generator,
+        strided_unet,
+    ]
+    model_type_map = {
+        model.__name__: model for model in MODEL_FUNCTION
+    }
+    return model_type_map[chosen_type](config)
 
 
 def accuracy(real, fake):
@@ -27,43 +43,35 @@ class CycleGan(Model):
     def __init__(self, model_config: Bunch):
         super(CycleGan, self).__init__()
         self.model_config = model_config
-        self.model_location = getattr(self.model_config, 'location')
+        self.model_folder = join(self.model_config.location, self.model_config.name)
         self.train_summaries = tf.summary.create_file_writer(
-            join(self.model_location, self.model_config.name, 'train'))
+            join(self.model_folder, 'train'))
         self.val_summaries = tf.summary.create_file_writer(
-            join(self.model_location, self.model_config.name, 'validation')
+            join(self.model_folder, 'validation')
         )
         self.loss_weights = self.model_config.loss_weights
         if self.model_config.new:
             self.build_models()
             self.model_config.new = False
-            namespace2yaml(join(self.model_location, self.model_config.name, 'model_config.yaml'), self.model_config)
+            namespace2yaml(join(self.model_folder, 'model_config.yaml'), self.model_config)
         else:
             self.load_model()
 
     def build_models(self) -> NoReturn:
         # get model attributes
         gen_config = self.model_config.generator
-        generator_filters = gen_config['filters']
-        gen_kernel_size = gen_config['kernels']
-        gen_expansion = gen_config['expansion']
-        gen_norm = gen_config['normalization']
-
         disc_config = self.model_config.discriminator
-        disc_filters = disc_config['filters']
-        disc_kernel_size = disc_config['kernels']
-        disc_expansion = disc_config['expansion']
-        disc_norm = disc_config['normalization']
 
-        # TODO: clean up the generator and discriminator code to make it work for all combinations
-        self.g_AB = unet_generator(generator_filters, gen_kernel_size, 3, norm_type=gen_norm, expansion=gen_expansion)
-        self.g_BA = unet_generator(generator_filters, gen_kernel_size, 3, norm_type=gen_norm, expansion=gen_expansion)
-        self.d_A = unet_discriminator(disc_filters, disc_kernel_size, norm_type=disc_norm, expansion=disc_expansion)
-        self.d_B = unet_discriminator(disc_filters, disc_kernel_size, norm_type=disc_norm, expansion=disc_expansion)
+        self.g_AB = create_model(gen_config)
+        self.g_BA = create_model(gen_config)
+        self.d_A = create_model(disc_config)
+        self.d_B = create_model(disc_config)
 
     @tf.function
     def validate_step(self, real_a: Tensor, real_b: Tensor, training: bool = False) -> Dict:
         loss_obj = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        # TODO: test with this loss instead
+        # losses = tf.keras.losses.MeanSquaredError()
 
         fake_b = self.g_AB(real_a, training=training)
         cycled_a = self.g_BA(fake_b, training=training)
@@ -189,16 +197,15 @@ class CycleGan(Model):
             if e % save_images_every == 0:
                 self.write_images(e, a_samples, b_samples, tensorboard_samples)
 
-            # TODO: probably need some checkpointing here
-            if e % save_model_every == 0:
-                # self.save_model()
-                pass
             val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=200, total=validation_size)
             for i, (images_a, images_b) in enumerate(val_bar):
                 losses = self.validate_step(images_a, images_b, training=False)
                 self.update_metrics(validation_metrics_dict, losses)
                 self.display_metrics(validation_metrics_dict, val_bar)
             self.write_summaries(self.val_summaries, e, validation_metrics_dict)
+
+            if e % save_model_every == 0:
+                self.save_model()
 
         self.save_model()
 
@@ -255,14 +262,15 @@ class CycleGan(Model):
         progress_bar.set_postfix(**evaluated_metrics)
 
     def save_model(self):
-        tf.keras.models.save_model(self.d_A, join(self.model_location, self.model_config.name, 'd_A'))
-        tf.keras.models.save_model(self.d_B, join(self.model_location, self.model_config.name, 'd_B'))
-        tf.keras.models.save_model(self.g_AB, join(self.model_location, self.model_config.name, 'g_AB'))
-        tf.keras.models.save_model(self.g_BA, join(self.model_location, self.model_config.name, 'g_BA'))
+        save = lambda x: tf.keras.models.save_model(getattr(self, x), join(self.model_folder, x))
+        save('d_A')
+        save('d_B')
+        save('g_AB')
+        save('g_BA')
 
     def load_model(self):
-        model_path = join(self.model_location, self.model_config.name)
-        self.d_A = tf.saved_model.load(join(model_path, 'd_A'))
-        self.d_B = tf.saved_model.load(join(model_path, 'd_B'))
-        self.g_AB = tf.saved_model.load(join(model_path, 'g_AB'))
-        self.g_BA = tf.saved_model.load(join(model_path, 'g_BA'))
+        load = lambda x: tf.saved_model.load(join(self.model_folder, x))
+        self.d_A = load('d_A')
+        self.d_B = load('d_B')
+        self.g_AB = load('g_AB')
+        self.g_BA = load('g_BA')
