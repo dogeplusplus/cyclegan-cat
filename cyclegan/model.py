@@ -8,7 +8,7 @@ from bunch import Bunch
 from tensorflow import Tensor
 from tensorflow.keras.models import Model
 
-from cyclegan.losses import calc_cycle_loss, identity_loss, discriminator_loss, generator_loss
+from cyclegan.losses import calc_cycle_loss, identity_loss, discriminator_loss, generator_loss, get_loss_obj
 from cyclegan.optimizers import get_optimizer
 from cyclegan.resnet import simple_discriminator, resnet_generator
 from cyclegan.unet import unet_generator, strided_unet
@@ -67,11 +67,10 @@ class CycleGan(Model):
         self.d_A = create_model(disc_config)
         self.d_B = create_model(disc_config)
 
+        self.loss_obj = get_loss_obj(self.model_config.loss)
+
     @tf.function
     def validate_step(self, real_a: Tensor, real_b: Tensor, training: bool = False) -> Dict:
-        loss_obj = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-        # TODO: test with this loss instead
-        # losses = tf.keras.losses.MeanSquaredError()
 
         fake_b = self.g_AB(real_a, training=training)
         cycled_a = self.g_BA(fake_b, training=training)
@@ -88,8 +87,8 @@ class CycleGan(Model):
         disc_fake_a = self.d_A(fake_a, training=training)
         disc_fake_b = self.d_B(fake_b, training=training)
 
-        gAB_loss = generator_loss(disc_fake_b, loss_obj, self.loss_weights['generator'])
-        gBA_loss = generator_loss(disc_fake_a, loss_obj, self.loss_weights['generator'])
+        gAB_loss = generator_loss(disc_fake_b, self.loss_obj, self.loss_weights['generator'])
+        gBA_loss = generator_loss(disc_fake_a, self.loss_obj, self.loss_weights['generator'])
 
         total_cycle_loss = calc_cycle_loss(real_a, cycled_a, self.loss_weights['cycle']) + calc_cycle_loss(real_b,
                                                                                                            cycled_b,
@@ -101,8 +100,8 @@ class CycleGan(Model):
         total_gBA_loss = gBA_loss + total_cycle_loss + identity_loss(real_a, same_a,
                                                                      self.loss_weights['identity'])
 
-        da_loss = discriminator_loss(disc_real_a, disc_fake_a, loss_obj, self.loss_weights['discriminator'])
-        db_loss = discriminator_loss(disc_real_b, disc_fake_b, loss_obj, self.loss_weights['discriminator'])
+        da_loss = discriminator_loss(disc_real_a, disc_fake_a, self.loss_obj, self.loss_weights['discriminator'])
+        db_loss = discriminator_loss(disc_real_b, disc_fake_b, self.loss_obj, self.loss_weights['discriminator'])
 
         da_accuracy = accuracy(disc_real_a, disc_fake_a)
         db_accuracy = accuracy(disc_real_b, disc_fake_b)

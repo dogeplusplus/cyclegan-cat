@@ -42,7 +42,7 @@ def strided_unet(config: Dict) -> Model:
     down_filters = filters
     up_filters = filters[::-1][:-1]
     for filter, kernel_size in list(zip(down_filters, kernel_sizes))[:-1]:
-        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)
+        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)(x)
         if norm_type == 'instancenorm':
             x = InstanceNormalization()(x)
         else:

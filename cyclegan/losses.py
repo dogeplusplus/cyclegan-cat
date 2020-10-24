@@ -62,3 +62,20 @@ def discriminator_loss(real: Tensor, generated: Tensor, loss_obj: tf.keras.losse
     generated_loss = loss_obj(tf.zeros_like(generated), generated)
     total_disc_loss = real_loss + generated_loss
     return weight * total_disc_loss
+
+
+def get_loss_obj(loss: str):
+    """Return the type of loss function based on the name
+
+    Args:
+        loss: abbreviation of loss function to use
+
+    Returns:
+        Loss object to be passed into the cycle gan losses.
+    """
+    LOSS_OBJ_MAPS = {
+        "mse": tf.keras.losses.MeanSquaredError(),
+        "mae": tf.keras.losses.MeanAbsoluteError(),
+        "bce": tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    }
+    return LOSS_OBJ_MAPS[loss]
