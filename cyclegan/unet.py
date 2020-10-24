@@ -65,7 +65,7 @@ def strided_unet(config: Dict) -> Model:
         x = LeakyReLU(0.2)(x)
 
     last = Conv2DTranspose(output_channels, 4, strides=2, padding='same', kernel_initializer=initializer,
-                           activation=final_activation)
+                           activation=final_activation)(x)
     return Model(inputs, last)
 
 

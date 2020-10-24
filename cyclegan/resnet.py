@@ -92,14 +92,14 @@ def simple_discriminator(config: Dict) -> Model:
 
     x = input
     initializer = tf.random_normal_initializer(0., 0.02)
-    for filter in down_filters:
-        x = Conv2D(filter, kernel_size, strides=2, padding='same', kernel_initializer=initializer)(x)
+    for kernel, filter in zip(kernel_size, down_filters):
+        x = Conv2D(filter, kernel, strides=2, padding='same', kernel_initializer=initializer)(x)
         if norm_type == 'instancenorm':
             x = InstanceNormalization(center=False, scale=False)(x)
         else:
             x = BatchNormalization(center=False, scale=False)(x)
         x = LeakyReLU(0.2)(x)
 
-    output = Conv2D(1, kernel_size, strides=1, padding='same', kernel_initializer=initializer)(x)
+    output = Conv2D(1, kernel_size=1, strides=1, padding='same', kernel_initializer=initializer)(x)
 
     return Model(input, output)
