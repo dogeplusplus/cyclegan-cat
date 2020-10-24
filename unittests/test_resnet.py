@@ -45,4 +45,5 @@ def test_simple_discriminator(mock_image):
         normalization='instancenorm'
     )
     model = simple_discriminator(model_config)
-    prediction = model(mock_image)
+    prediction = model(mock_image).numpy()
+    assert prediction.shape == (1, 16, 16, 1)

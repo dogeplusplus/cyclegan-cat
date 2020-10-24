@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import pytest
 import numpy as np
 
@@ -34,3 +36,37 @@ def test_strided_unet(config, mock_image):
     prediction = model(mock_image)
 
     assert mock_image.shape == prediction.shape
+
+
+def test_incomplete_unet_model_config(config):
+    # Check that unet generator cannot be initialized with an incomplete config
+    MANDATORY_FIELDS = [
+        'filters',
+        'kernels',
+        'expansion',
+        'normalization',
+        'dropout',
+        'output_channels',
+        'final_activation'
+    ]
+    for field in MANDATORY_FIELDS:
+        custom_config = deepcopy(config)
+        del custom_config[field]
+        with pytest.raises(KeyError):
+            unet_generator(custom_config)
+
+
+def test_incomplete_strided_model_config(config):
+    # Check that strided unet cannot be initialized with an incomplete config
+    MANDATORY_FIELDS = [
+        'filters',
+        'kernels',
+        'normalization',
+        'output_channels',
+        'final_activation'
+    ]
+    for field in MANDATORY_FIELDS:
+        custom_config = deepcopy(config)
+        del custom_config[field]
+        with pytest.raises(KeyError):
+            strided_unet(custom_config)
