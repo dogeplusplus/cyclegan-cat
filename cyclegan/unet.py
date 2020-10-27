@@ -1,9 +1,9 @@
 import tensorflow as tf
-from typing import List, Dict
+from typing import Dict
 
 from tensorflow.python.keras import Input
-from tensorflow.python.keras.layers import MaxPooling2D, UpSampling2D, Conv2DTranspose, BatchNormalization, LeakyReLU, \
-    Concatenate, Conv2D, Dropout, Activation
+from tensorflow.python.keras.layers import UpSampling2D, Conv2DTranspose, BatchNormalization, \
+    Concatenate, Conv2D, Dropout, Activation, AveragePooling2D, ReLU
 from tensorflow.python.keras.models import Model
 from tensorflow_addons.layers import InstanceNormalization
 
@@ -20,7 +20,7 @@ def double_conv(filter: int, kernel_size: int,
         elif norm_type.lower() == 'instancenorm':
             layers.add(InstanceNormalization())
 
-        layers.add(LeakyReLU(0.2))
+        layers.add(ReLU())
         if apply_dropout:
             layers.add(Dropout(0.5))
 
@@ -48,7 +48,7 @@ def strided_unet(config: Dict) -> Model:
         else:
             x = BatchNormalization()(x)
 
-        x = LeakyReLU(0.2)(x)
+        x = ReLU()(x)
         skips.insert(0, x)
 
     x = Conv2D(filters[-1], kernel_sizes[-1], strides=2, padding='same', kernel_initializer=initializer)(x)
@@ -62,7 +62,7 @@ def strided_unet(config: Dict) -> Model:
         else:
             x = BatchNormalization()(x)
 
-        x = LeakyReLU(0.2)(x)
+        x = ReLU()(x)
 
     last = Conv2DTranspose(output_channels, 4, strides=2, padding='same', kernel_initializer=initializer,
                            activation=final_activation)(x)
@@ -89,7 +89,7 @@ def unet_generator(config: Dict) -> Model:
     for filter, kernel_size in list(zip(down_filters, kernel_sizes))[:-1]:
         x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
         skips.insert(0, x)
-        x = MaxPooling2D()(x)
+        x = AveragePooling2D()(x)
 
     # Bottom section
     x = double_conv(down_filters[-1], kernel_sizes[-1], norm_type, apply_dropout)(x)
@@ -105,7 +105,7 @@ def unet_generator(config: Dict) -> Model:
                 x = InstanceNormalization()(x)
             else:
                 x = BatchNormalization()(x)
-            x = LeakyReLU(0.2)(x)
+            x = ReLU(x)
         x = Concatenate()([skip, x])
         x = double_conv(filter, kernel_size, norm_type, apply_dropout)(x)
 

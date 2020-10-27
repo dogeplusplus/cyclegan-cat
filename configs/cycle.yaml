@@ -1,11 +1,11 @@
-name: cat2scrunge
+name: samnyx_relu_many_epochs_256
 new: true
 location: model_instances
 generator:
-  type: resnet_generator
+  type: unet_generator
   filters:
-    - 32
-    - 32
+    - 64
+    - 64
     - 64
     - 64
   kernels:
@@ -33,8 +33,9 @@ discriminator:
   normalization: instancenorm
   dropout: False
   final_activation: sigmoid
+loss: mse
 loss_weights:
   cycle: 2.0
   identity: 0.5
-  generator: 0.5
-  discriminator: 1.0
+  generator: 1.0
+  discriminator: 0.5
