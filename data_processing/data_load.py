@@ -31,8 +31,8 @@ def image2example(image: np.array) -> tf.train.Example:
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def tfrecord_writer(image_paths: str, target: str = 'images.tfrecords', max_images: int = 640, image_size: int = None):
-    images = os.listdir(image_paths)[:max_images]
+def tfrecord_writer(image_paths: str, target: str = 'images.tfrecords', image_size: int = None):
+    images = os.listdir(image_paths)
     logger.info(f'Images Found: {len(images)}')
     with tf.io.TFRecordWriter(target) as writer:
         for image in images:

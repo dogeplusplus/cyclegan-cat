@@ -1,4 +1,4 @@
-name: samnyx_relu_many_epochs_256
+name: model
 new: true
 location: model_instances
 generator:
