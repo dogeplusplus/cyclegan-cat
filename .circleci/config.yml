@@ -4,19 +4,18 @@ orbs:
   python: circleci/python@1.2.1
 
 jobs:
-  build-and-test:
+  build:
     executor: python/default
     steps:
       - checkout
       - python/install-packages:
           pip-dependency-file: requirements.txt
           pkg-manager: pip
-      - python/test:
-          pkg-manager: pip
-          test-tool: pytest
 
 workflows:
   main:
     jobs:
       - build-and-test
-
+      - python/test:
+          pkg-manager: pip
+          test-tool: pytest
