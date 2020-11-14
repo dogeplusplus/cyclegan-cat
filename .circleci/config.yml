@@ -15,7 +15,7 @@ jobs:
 workflows:
   main:
     jobs:
-      - build-and-test
+      - build
       - python/test:
           pkg-manager: pip
           test-tool: pytest
