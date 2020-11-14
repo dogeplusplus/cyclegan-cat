@@ -1,6 +1,6 @@
 epochs: 500
 batch_size: 2
-image_size: 256
+image_size: 512
 g_opt:
   name: adam
   learning_rate: 0.0002

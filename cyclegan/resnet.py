@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import Dict
 
 import tensorflow as tf
 from tensorflow.python.keras import Input

@@ -4,8 +4,6 @@ from cyclegan.model import CycleGan
 from data_processing.data_load import create_dataset
 from model_processing.load_model import yaml2namespace
 
-import tensorflow as tf
-
 # gpus = tf.config.experimental.list_physical_devices('GPU')
 # VRAM_MAX = 4096
 #
