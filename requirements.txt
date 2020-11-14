@@ -8,3 +8,4 @@ opencv-python~=3.4.9.31
 wheel~=0.35.1
 numpy~=1.19.2
 pytest~=6.1.2
+tensorflow-addons~=0.11.2
