@@ -9,3 +9,6 @@ wheel~=0.35.1
 numpy~=1.19.2
 pytest~=6.1.2
 tensorflow-addons~=0.11.2
+prefect~=0.15.11
+label-studio~=1.4
+
