@@ -1,14 +1,13 @@
 import os
 import petpy
-import uuid
-import urllib
+import urllib.error
+import urllib.request
 
 from pathlib import Path
 from operator import add
 from functools import reduce
-from prefect import task, Parameter, Flow, mapped, unmapped
 from prefect.executors import LocalDaskExecutor
-from typing import Tuple, List
+from prefect import task, Parameter, Flow, mapped, unmapped, flatten
 
 
 @task
@@ -18,19 +17,23 @@ def get_photo_urls(api, breed, pages):
             results_per_page=100,
             pages=pages,
             return_df=True)
-    medium_urls = df["photos"].map(lambda x: [y["medium"] for y in x])
+    medium_urls = df["photos"].map(lambda x: [y["large"] for y in x])
     photo_urls = reduce(add, medium_urls.to_list())
 
     return photo_urls
 
 
+@task(nout=2)
+def generate_save_paths(urls, destination, breed):
+    breed_dir = Path(destination, breed)
+    breed_dir.mkdir(parents=True, exist_ok=True)
+    save_paths = [breed_dir.joinpath(f"{i}.png") for i, _ in enumerate(urls)]
+    return save_paths
+
+
 @task
-def batch_download_photo(photo_urls, breed_name, destination):
-    breed_folder = Path(destination, breed_name)
-    breed_folder.mkdir(parents=True, exist_ok=True)
-    for url in photo_urls:
-        save_path = breed_folder.joinpath(f"{uuid.uuid4()}.jpg")
-        urllib.request.urlretrieve(url, save_path)
+def download_photo(url, save_path):
+    urllib.request.urlretrieve(url, save_path)
 
 
 def build_flow():
@@ -45,14 +48,15 @@ def build_flow():
         pages = Parameter("pages")
 
         work_list = get_photo_urls(unmapped(pf), mapped(breeds), unmapped(pages))
-        batch_download_photo(mapped(work_list), mapped(breeds), unmapped(destination))
+        save_paths = generate_save_paths(mapped(work_list), unmapped(destination), mapped(breeds))
+        download_photo(flatten(mapped(work_list)), flatten(mapped(save_paths)))
 
     return flow
 
 
 def main():
     flow = build_flow()
-    flow.executor = LocalDaskExecutor()
+    flow.executor = LocalDaskExecutor(schedules="threads")
     flow.register(project_name="cyclegan-cat")
 
 
