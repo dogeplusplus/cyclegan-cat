@@ -27,7 +27,7 @@ def get_photo_urls(api, breed, pages):
 def generate_save_paths(urls, destination, breed):
     breed_dir = Path(destination, breed)
     breed_dir.mkdir(parents=True, exist_ok=True)
-    save_paths = [breed_dir.joinpath(f"{i}.png") for i, _ in enumerate(urls)]
+    save_paths = [breed_dir.joinpath(f"{i:05}.png") for i, _ in enumerate(urls)]
     return save_paths
 
 
