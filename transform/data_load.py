@@ -1,12 +1,13 @@
-import os
-
 import cv2
+import random
 import logging
 import numpy as np
 import tensorflow as tf
 
-from os.path import join
+from pathlib import Path
+from typing import List, Tuple
 from functools import partial
+from tensorflow.data import Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -21,42 +22,49 @@ def _byte_feature(value):
 
 def image2example(image: np.array) -> tf.train.Example:
     height, width, depth = image.shape
-    image_bytes = cv2.imencode('.png', image)[1].tobytes()
+    image_bytes = cv2.imencode(".png", image)[1].tobytes()
     feature = {
-        'image_raw': _byte_feature(image_bytes),
-        'height': _int64_feature(height),
-        'width': _int64_feature(width),
-        'depth': _int64_feature(depth)
+        "image_raw": _byte_feature(image_bytes),
+        "height": _int64_feature(height),
+        "width": _int64_feature(width),
+        "depth": _int64_feature(depth)
     }
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def tfrecord_writer(image_paths: str, target: str = 'images.tfrecords', image_size: int = None):
-    images = os.listdir(image_paths)
-    logger.info(f'Images Found: {len(images)}')
-    with tf.io.TFRecordWriter(target) as writer:
-        for image in images:
-            img = cv2.imread(join(image_paths, image), cv2.IMREAD_COLOR)
-            if image_size:
-                cv2.resize(img, (image_size, image_size))
-            feature = image2example(img)
-            writer.write(feature.SerializeToString())
+def tfrecord_writer(image_paths: str, target: str, image_size: int = None, shard_size: int = 800):
+    images = list(Path(image_paths).iterdir())
+    random.shuffle(images)
+    logger.info(f"Images Found: {len(images)}")
+
+    target = Path(target)
+    target.mkdir(parents=True, exist_ok=True)
+
+    for i in range(0, len(images), shard_size):
+        record_file = target / f"{i:05d}.tfrecords"
+        with tf.io.TFRecordWriter(record_file) as writer:
+            for image in images[i*shard_size:(i+1)*shard_size]:
+                img = cv2.imread(Path(image_paths, image), cv2.IMREAD_COLOR)
+                if image_size:
+                    cv2.resize(img, (image_size, image_size))
+                feature = image2example(img)
+                writer.write(feature.SerializeToString())
 
 
-def example2image(example):
+def example2image(example: tf.train.Example) -> tf.Tensor:
     feature = {
-        'image_raw': tf.io.FixedLenFeature([], dtype=tf.string),
-        'height': tf.io.FixedLenFeature([], dtype=tf.int64),
-        'width': tf.io.FixedLenFeature([], dtype=tf.int64),
-        'depth': tf.io.FixedLenFeature([], dtype=tf.int64)
+        "image_raw": tf.io.FixedLenFeature([], dtype=tf.string),
+        "height": tf.io.FixedLenFeature([], dtype=tf.int64),
+        "width": tf.io.FixedLenFeature([], dtype=tf.int64),
+        "depth": tf.io.FixedLenFeature([], dtype=tf.int64)
     }
     parsed = tf.io.parse_single_example(example, feature)
-    image_vector = tf.image.decode_image(parsed['image_raw'], channels=3)
-    image = tf.reshape(image_vector, (parsed['height'], parsed['width'], parsed['depth']))
+    image_vector = tf.image.decode_image(parsed["image_raw"], channels=3)
+    image = tf.reshape(image_vector, (parsed["height"], parsed["width"], parsed["depth"]))
     return image
 
 
-def apply_augmentation(dataset, image_size):
+def apply_augmentation(dataset: Dataset, image_size: int) -> Dataset:
     def random_jitter(image):
         image = tf.image.resize(image, [image_size + 50, image_size + 50],
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
@@ -68,14 +76,14 @@ def apply_augmentation(dataset, image_size):
     return dataset
 
 
-def normalize(tensor):
+def normalize(tensor: tf.Tensor) -> tf.Tensor:
     image = tf.cast(tensor, tf.float32)
     image = (image / 127.5) - 1
     return image
 
 
-def create_dataset(records_a, records_b, validation_split=0.2, width=128):
-    def apply_mappings(dataset, image_size):
+def create_dataset(records_a: List[str], records_b: List[str], validation_split=0.2, width=128) -> Tuple[Dataset, Dataset]:
+    def apply_mappings(dataset: Dataset, image_size: int) -> Dataset:
         resize = partial(tf.image.resize, size=image_size)
 
         dataset = dataset.map(example2image, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -104,8 +112,8 @@ def create_dataset(records_a, records_b, validation_split=0.2, width=128):
     train_a = apply_augmentation(train_a, width)
     train_b = apply_augmentation(train_b, width)
 
-    train_dataset = tf.data.Dataset.zip((train_a, train_b))
-    val_dataset = tf.data.Dataset.zip((val_a, val_b))
+    train_dataset = Dataset.zip((train_a, train_b))
+    val_dataset = Dataset.zip((val_a, val_b))
     train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
     val_dataset = val_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
