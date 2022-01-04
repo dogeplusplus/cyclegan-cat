@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from typing import Tuple
 
 from cyclegan.model import CycleGan
-from data_processing.data_load import normalize
+from transform.data_load import normalize
 from model_processing.load_model import yaml2namespace
 
 
