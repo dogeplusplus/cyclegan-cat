@@ -1,7 +1,7 @@
-from prefect import task, Parameter, Flow
+from prefect import task, Parameter, Flow, mapped, unmapped
 from prefect.executors import LocalDaskExecutor
 
-from data_processing.data_load import tfrecord_writer
+from transform.data_load import tfrecord_writer
 
 
 @task
@@ -14,7 +14,7 @@ def build_flow():
         images = Parameter("images_path")
         destination = Parameter("destination")
         size = Parameter("size")
-        write_tfrecords(images, destination, size)
+        write_tfrecords(mapped(images), mapped(destination), unmapped(size))
 
     return flow
 
