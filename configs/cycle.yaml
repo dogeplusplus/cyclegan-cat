@@ -4,10 +4,10 @@ location: model_instances
 generator:
   type: unet_generator
   filters:
+    - 32
     - 64
-    - 64
-    - 64
-    - 64
+    - 128
+    - 256
   kernels:
     - 4
     - 4
@@ -22,8 +22,8 @@ discriminator:
   type: unet_generator
   filters:
     - 32
-    - 32
-    - 32
+    - 64
+    - 128
   kernels:
     - 7
     - 5

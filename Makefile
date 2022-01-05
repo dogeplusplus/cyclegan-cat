@@ -12,16 +12,12 @@ install-hooks:
 
 .PHONY:tensorboard
 tensorboard:
-	tensorboard --logdir=runs
+	tensorboard --logdir=model_instances
 
 .PHONY:dvc
 dvc:
 	dvc init
 	dvc remote add --default gdrive ${DVC_REMOTE}
-
-.PHONY: mlflow
-mlflow:
-	mlflow ui
 
 .PHONY: prefect
 prefect:
