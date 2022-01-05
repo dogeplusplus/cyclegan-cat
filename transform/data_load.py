@@ -41,10 +41,10 @@ def tfrecord_writer(image_paths: str, target: str, image_size: int = None, shard
     target.mkdir(parents=True, exist_ok=True)
 
     for i in range(0, len(images), shard_size):
-        record_file = target / f"{i:05d}.tfrecords"
+        record_file = str(target / f"{i // shard_size:05d}.tfrecords")
         with tf.io.TFRecordWriter(record_file) as writer:
             for image in images[i*shard_size:(i+1)*shard_size]:
-                img = cv2.imread(Path(image_paths, image), cv2.IMREAD_COLOR)
+                img = cv2.imread(str(image), cv2.IMREAD_COLOR)
                 if image_size:
                     cv2.resize(img, (image_size, image_size))
                 feature = image2example(img)
