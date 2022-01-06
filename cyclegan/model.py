@@ -189,7 +189,7 @@ class CycleGan(Model):
         desc = "Epoch {} training"
         val_desc = "Epoch {} validation"
         for e in range(epochs):
-            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=200, total=training_size)
+            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=50, total=training_size)
             for (images_a, images_b) in train_bar:
                 losses = self.train_step(images_a, images_b)
                 self.update_metrics(train_metrics_dict, losses)
@@ -199,7 +199,7 @@ class CycleGan(Model):
             if e % save_images_every == 0:
                 self.write_images(e, a_samples, b_samples, tensorboard_samples)
 
-            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=200, total=validation_size)
+            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=50, total=validation_size)
             for (images_a, images_b) in val_bar:
                 losses = self.validate_step(images_a, images_b, training=False)
                 self.update_metrics(validation_metrics_dict, losses)

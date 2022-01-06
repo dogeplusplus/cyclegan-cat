@@ -1,5 +1,5 @@
 epochs: 500
-batch_size: 2
+batch_size: 8
 image_size: 256
 g_opt:
   name: adam
