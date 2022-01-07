@@ -40,7 +40,7 @@ def accuracy(real, fake):
 
 
 class CycleGan(Model):
-    def __init__(self, model_config: Bunch, train_config: Bunch):
+    def __init__(self, model_config: Bunch, train_config: Bunch = None):
         super(CycleGan, self).__init__()
         self.model_config = model_config
         self.model_folder = join(self.model_config.location, self.model_config.name)
@@ -56,8 +56,8 @@ class CycleGan(Model):
         self.d_B_optimizer = get_optimizer(self.train_config.d_opt)
 
         self.loss_weights = self.model_config.loss_weights
+        self.build_models()
         if self.model_config.new:
-            self.build_models()
             self.model_config.new = False
             namespace2yaml(join(self.model_folder, "model_config.yaml"), self.model_config)
         else:

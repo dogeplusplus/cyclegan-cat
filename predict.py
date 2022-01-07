@@ -1,23 +1,21 @@
-import os
-
 import cv2
-import argparse
 import numpy as np
-import matplotlib.pyplot as plt
+import streamlit as st
 from typing import Tuple
+from pathlib import Path
+
+import tensorflow as tf
 
 from cyclegan.model import CycleGan
 from transform.data_load import normalize
 from model_processing.load_model import yaml2namespace
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Predict on single image')
-    parser.add_argument('--model', type=str, help='Path to model folder')
-    parser.add_argument('--images', type=str, help='Path to images')
-
-    args = parser.parse_args()
-    return args
+def load_model():
+    model_config_path = Path("model_instances", "model", "model_config.yaml")
+    train_config_path = Path("model_instances", "model", "train_config.yaml")
+    model = CycleGan(yaml2namespace(str(model_config_path)), yaml2namespace(str(train_config_path)))
+    return model
 
 def preprocess_image(image: np.array, size: Tuple[int, int]) -> np.array:
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -40,30 +38,31 @@ def generate_prediction_triple(image, model):
     image_viz = cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), IMAGE_SIZE)
     return image_viz, prediction_ab, prediction_ba
 
-def main(args):
-    model = CycleGan(model_config=yaml2namespace(os.path.join(args.model, 'model_config.yaml')))
 
-    image_paths = os.listdir(args.images)
-    n_rows = len(image_paths)
-    fig, ax = plt.subplots(n_rows, 3, figsize=(n_rows * 2, 6))
-    ax[0, 0].set_title('Original Image')
-    ax[0, 1].set_title('Prediction: A -> B')
-    ax[0, 2].set_title('Prediction: B -> A')
+def main():
+    model = load_model()
 
-    for i, path in enumerate(image_paths):
-        image = cv2.imread(os.path.join(args.images, path), cv2.IMREAD_UNCHANGED)
-        img_viz, pred_ab, pred_ba = generate_prediction_triple(image, model)
-        ax[i, 0].imshow(img_viz)
-        ax[i, 1].imshow(pred_ab)
-        ax[i, 2].imshow(pred_ba)
+    st.title("Tabby2Tortie")
+    tabby_upload = st.sidebar.file_uploader("Tabby Cat", type=["jpg", "jpeg", "png"])
+    tortie_upload = st.sidebar.file_uploader("Tortiseshell Cat", type=["jpg", "jpeg", "png"])
+    image_col, tabby_col, tortie_col = st.columns(3)
+    image_col.subheader("Image")
+    tabby_col.subheader("Tabby")
+    tortie_col.subheader("Tortie")
 
-        ax[i, 0].axis('off')
-        ax[i, 1].axis('off')
-        ax[i, 2].axis('off')
+    if tabby_upload:
+        tabby_image = cv2.imdecode(np.fromstring(tabby_upload.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+        image, tortie, tabby = generate_prediction_triple(tabby_image, model)
+        image_col.image(image)
+        tabby_col.image(tabby)
+        tortie_col.image(tortie)
 
-    plt.tight_layout()
-    plt.show()
+    if tortie_upload:
+        tortie_image = cv2.imdecode(np.fromstring(tortie_upload.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+        image, tortie, tabby = generate_prediction_triple(tortie_image, model)
+        image_col.image(image)
+        tabby_col.image(tabby)
+        tortie_col.image(tortie)
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    main(args)
+    main()
