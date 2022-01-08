@@ -6,7 +6,6 @@ import tensorflow as tf
 
 from pathlib import Path
 from typing import List, Tuple
-from functools import partial
 from tensorflow.data import Dataset
 
 logger = logging.getLogger(__name__)
@@ -46,7 +45,7 @@ def tfrecord_writer(image_paths: str, target: str, image_size: int = None, shard
             for image in images[i*shard_size:(i+1)*shard_size]:
                 img = cv2.imread(str(image), cv2.IMREAD_COLOR)
                 if image_size:
-                    cv2.resize(img, (image_size, image_size))
+                    img = cv2.resize(img, (image_size, image_size))
                 feature = image2example(img)
                 writer.write(feature.SerializeToString())
 
@@ -66,8 +65,7 @@ def example2image(example: tf.train.Example) -> tf.Tensor:
 
 def apply_augmentation(dataset: Dataset, image_size: int) -> Dataset:
     def random_jitter(image):
-        image = tf.image.resize(image, [image_size + 50, image_size + 50],
-                                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        image = tf.image.resize(image, [image_size + 50, image_size + 50])
         image = tf.image.random_crop(image, size=[image_size, image_size, 3])
         image = tf.image.random_flip_left_right(image)
         return image
@@ -84,10 +82,8 @@ def normalize(tensor: tf.Tensor) -> tf.Tensor:
 
 def create_dataset(records_a: List[str], records_b: List[str], validation_split=0.2, width=128) -> Tuple[Dataset, Dataset]:
     def apply_mappings(dataset: Dataset, image_size: int) -> Dataset:
-        resize = partial(tf.image.resize, size=image_size)
-
         dataset = dataset.map(example2image, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataset = dataset.map(resize, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.map(lambda x: tf.image.resize(x, image_size), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         dataset = dataset.map(normalize, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
         shuffle_buffer = 1000
