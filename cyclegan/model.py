@@ -33,6 +33,21 @@ def create_model(config: Dict) -> Model:
 
 
 def accuracy(real, fake):
+    """
+    Calculate the accuracy of model based on the discriminator predictions.
+
+    Parameters
+    ----------
+    real: Tensor
+        Probabilities that the real images are real
+    fake: Tensor
+        Probabilities that the fake images are real
+
+    Returns
+    -------
+    acc: Tensor
+        Accuracy of the probability predictions.
+    """
     predictions = tf.cast(tf.concat([real, fake], axis=0) > 0.5, tf.float32)
     labels = tf.concat([tf.ones_like(real), tf.zeros_like(fake, tf.float32)], axis=0)
     acc = tf.reduce_mean(tf.cast(tf.equal(predictions, labels), tf.float32))
@@ -59,12 +74,7 @@ class CycleGan(Model):
         self.build_models()
         if self.model_config.new:
             self.model_config.new = False
-            namespace2yaml(join(self.model_folder, "model_config.yaml"), self.model_config)
         else:
-            self.load_optimizer(self.g_AB, self.g_AB_optimizer, join(self.model_folder, "g_AB_optimizer.npy"))
-            self.load_optimizer(self.g_BA, self.g_BA_optimizer, join(self.model_folder, "g_BA_optimizer.npy"))
-            self.load_optimizer(self.d_A, self.d_A_optimizer, join(self.model_folder, "d_A_optimizer.npy"))
-            self.load_optimizer(self.d_B, self.d_B_optimizer, join(self.model_folder, "d_B_optimizer.npy"))
             self.load_model()
 
     def build_models(self):
@@ -172,15 +182,17 @@ class CycleGan(Model):
             for m in metric_names
         }
 
-        val_iter = iter(validation_dataset)
-        for _ in range(tensorboard_samples):
-            sample_images.append(next(val_iter))
+        # Create new set of validation images to store for future re-training
+        if not hasattr(self, "a_samples") and not hasattr(self, "b_samples"):
+            val_iter = iter(validation_dataset)
+            for _ in range(tensorboard_samples):
+                sample_images.append(next(val_iter))
 
-        a_samples = tf.stack([s[0] for s in sample_images])
-        b_samples = tf.stack([s[1] for s in sample_images])
-        with self.val_summaries.as_default():
-            tf.summary.image(name="A", data=tf.add(a_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
-            tf.summary.image(name="B", data=tf.add(b_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
+            self.a_samples = tf.stack([s[0] for s in sample_images])
+            self.b_samples = tf.stack([s[1] for s in sample_images])
+            with self.val_summaries.as_default():
+                tf.summary.image(name="A", data=tf.add(self.a_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
+                tf.summary.image(name="B", data=tf.add(self.b_samples, 1) / 2, step=0, max_outputs=tensorboard_samples)
 
         train_dataset = train_dataset.batch(batch_size)
         validation_dataset = validation_dataset.batch(batch_size)
@@ -188,8 +200,13 @@ class CycleGan(Model):
         validation_size = sum(1 for _ in validation_dataset)
         desc = "Epoch {} training"
         val_desc = "Epoch {} validation"
-        for e in range(epochs):
-            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=50, total=training_size)
+
+        current_epoch = 0
+        if hasattr(self.model_config, "current_epoch"):
+            current_epoch = self.model_config.current_epoch
+
+        for e in range(current_epoch, current_epoch + epochs):
+            train_bar = tqdm.tqdm(train_dataset, desc=desc.format(e + 1), ncols=0, total=training_size)
             for (images_a, images_b) in train_bar:
                 losses = self.train_step(images_a, images_b)
                 self.update_metrics(train_metrics_dict, losses)
@@ -197,9 +214,9 @@ class CycleGan(Model):
 
             self.write_summaries(self.train_summaries, e, train_metrics_dict)
             if e % save_images_every == 0:
-                self.write_images(e, a_samples, b_samples, tensorboard_samples)
+                self.write_images(e, self.a_samples, self.b_samples, tensorboard_samples)
 
-            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=50, total=validation_size)
+            val_bar = tqdm.tqdm(validation_dataset, desc=val_desc.format(e + 1), ncols=0, total=validation_size)
             for (images_a, images_b) in val_bar:
                 losses = self.validate_step(images_a, images_b, training=False)
                 self.update_metrics(validation_metrics_dict, losses)
@@ -209,15 +226,23 @@ class CycleGan(Model):
             if e % save_model_every == 0:
                 self.save_model()
 
+        self.model_config.current_epoch = current_epoch + epochs
+        namespace2yaml(join(self.model_folder, "model_config.yaml"), self.model_config)
         self.save_model()
 
-    def write_summaries(self, summaries: tf.summary.SummaryWriter, epoch: int, metrics_dict: Dict[str, Tensor]):
-        """Write summaries into tensorboard
 
-        Args:
-            summaries: training or validation summaries
-            epoch: epoch number
-            metrics_dict: dictionary of metrics
+    def write_summaries(self, summaries: tf.summary.SummaryWriter, epoch: int, metrics_dict: Dict[str, Tensor]):
+        """
+        Write summaries into tensorboard
+
+        Parameters
+        ----------
+        summaries: tf.summary.SummaryWriter
+            training or validation summaries
+        epoch: int
+            epoch number
+        metrics_dict: dict
+            dictionary of metrics
         """
         with summaries.as_default():
             for name, metric in metrics_dict.items():
@@ -225,13 +250,19 @@ class CycleGan(Model):
                 metrics_dict[name].reset_states()
 
     def write_images(self, epoch: int, a_samples: Tensor, b_samples: Tensor, num_samples: int):
-        """Write summaries into tensorboard
+        """
+        Write summaries into tensorboard
 
-        Args:
-            epoch: epoch number
-            a_samples: sample images of class a for tensorboard
-            b_samples: sample images of class b for tensorboard
-            num_samples: number of samples of each class to display
+        Parameters
+        ----------
+        epoch: int
+            epoch number
+        a_samples: Tensor
+            sample images of class a for tensorboard
+        b_samples: Tensor
+            sample images of class b for tensorboard
+        num_samples: int
+            number of samples of each class to display
         """
         with self.val_summaries.as_default():
             prediction_ab = self.g_AB.predict(x=a_samples, batch_size=1)
@@ -244,11 +275,15 @@ class CycleGan(Model):
                              max_outputs=num_samples)
 
     def update_metrics(self, metrics_dict: Dict[str, Tensor], metrics: Dict):
-        """Update the metrics dictionary with values from the training step
+        """
+        Update the metrics dictionary with values from the training step
 
-        Args:
-            metrics_dict: dictionary of metrics
-            metrics: loss values from the training batch
+        Parameters
+        ----------
+        metrics_dict: dict
+            dictionary of metrics
+        metrics: dict
+            loss values from the training batch
         """
         for name in metrics_dict.keys():
             metrics_dict[name].update_state(metrics[name])
@@ -256,15 +291,21 @@ class CycleGan(Model):
     def display_metrics(self, metrics_dict: Dict[str, Tensor], progress_bar: tqdm.tqdm):
         """Display training progress to the console
 
-        Args:
-            metrics_dict: dictionary of metrics
-            progress_bar: tqdm progress bar
+        Parameters
+        ----------
+        metrics_dict: dict
+            dictionary of metrics
+        progress_bar: tqdm
+            tqdm progress bar
         """
         evaluated_metrics = {k: str(v.result().numpy())[:7] for k, v in metrics_dict.items()}
         progress_bar.set_postfix(**evaluated_metrics)
 
     def save_model(self):
-        save = lambda x: tf.keras.models.save_model(getattr(self, x), join(self.model_folder, x))
+        """
+        Save models, optimizers and image samples to disk.
+        """
+        save = lambda x: tf.keras.models.save_model(getattr(self, x), join(self.model_folder, x), include_optimizer=True)
         save("d_A")
         save("d_B")
         save("g_AB")
@@ -277,22 +318,46 @@ class CycleGan(Model):
         save_optimizer("d_A_optimizer")
         save_optimizer("d_B_optimizer")
 
+
+        np.save(join(self.model_folder, "a_samples.npy"), self.a_samples)
+        np.save(join(self.model_folder, "b_samples.npy"), self.b_samples)
+
     def load_model(self):
-        load = lambda x: tf.saved_model.load(join(self.model_folder, x))
+        """
+        Load models, optimizers and image samples to disk.
+        """
+        load = lambda x: tf.keras.models.load_model(join(self.model_folder, x))
         self.d_A = load("d_A")
         self.d_B = load("d_B")
         self.g_AB = load("g_AB")
         self.g_BA = load("g_BA")
 
+        self.load_optimizer(self.g_AB, self.g_AB_optimizer, join(self.model_folder, "g_AB_optimizer.npy"))
+        self.load_optimizer(self.g_BA, self.g_BA_optimizer, join(self.model_folder, "g_BA_optimizer.npy"))
+        self.load_optimizer(self.d_A, self.d_A_optimizer, join(self.model_folder, "d_A_optimizer.npy"))
+        self.load_optimizer(self.d_B, self.d_B_optimizer, join(self.model_folder, "d_B_optimizer.npy"))
+
+        load_numpy = lambda x: tf.convert_to_tensor(np.load(x))
+        self.a_samples = load_numpy(join(self.model_folder, "a_samples.npy"))
+        self.b_samples = load_numpy(join(self.model_folder, "b_samples.npy"))
+
     def load_optimizer(self, model, optimizer, optimizer_path):
+        """
+        Load and re-initialize optimizer from previous training round to prevent catastrophic forgetting.
+
+        Parameters
+        ----------
+        model: Model
+            Model that the optimizer belongs to
+        optimizer: Optimizer
+            Unitialized instance of the optimizer
+        optimizer_path: str
+            Path to optimizer weights
+        """
         weights = np.load(optimizer_path, allow_pickle=True)
         grad_vars = model.trainable_variables
         zero_grads = [tf.zeros_like(w) for w in grad_vars]
 
         optimizer.apply_gradients(zip(zero_grads, grad_vars))
         optimizer.set_weights(weights)
-
-
-
-
 

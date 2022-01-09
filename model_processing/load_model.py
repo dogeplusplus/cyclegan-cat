@@ -1,9 +1,9 @@
 import json
 import yaml
-from typing import Dict, NoReturn
-from importlib import import_module
 
+from typing import Dict
 from bunch import Bunch
+from importlib import import_module
 from tensorflow.keras.models import Model
 
 def yaml2namespace(yaml_path: str) -> Bunch:
@@ -21,7 +21,7 @@ def yaml2namespace(yaml_path: str) -> Bunch:
     model_config = Bunch(model_config_dict)
     return model_config
 
-def namespace2yaml(yaml_path: str, namespace: Bunch) -> NoReturn:
+def namespace2yaml(yaml_path: str, namespace: Bunch):
     """Save the YAML file on disk
 
     Args:
@@ -45,7 +45,7 @@ def json2dict(json_path: str) -> Dict:
 
     return contents
 
-def dict2json(dict: Dict, json_path: str) -> NoReturn:
+def dict2json(dict: Dict, json_path: str):
     """Save dictionary as json
 
     Args:
@@ -90,6 +90,3 @@ def construct_model(model_config: Dict) -> Model:
 
     return model_instance
 
-if __name__ == "__main__":
-    x = yaml2namespace("configs/cycle.yaml")
-    print(x)

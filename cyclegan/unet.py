@@ -1,9 +1,18 @@
 import tensorflow as tf
-from typing import Dict
 
-from tensorflow.python.keras import Input
-from tensorflow.python.keras.layers import UpSampling2D, Conv2DTranspose, BatchNormalization, \
-    Concatenate, Conv2D, Dropout, Activation, AveragePooling2D, ReLU
+from typing import Dict
+from tensorflow.keras import Input
+from tensorflow.keras.layers import (
+    UpSampling2D,
+    Conv2DTranspose,
+    BatchNormalization,
+    Concatenate,
+    Conv2D,
+    Dropout,
+    Activation,
+    AveragePooling2D,
+    ReLU,
+)
 from tensorflow.python.keras.models import Model
 from tensorflow_addons.layers import InstanceNormalization
 

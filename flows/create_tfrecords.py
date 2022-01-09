@@ -1,7 +1,7 @@
-from prefect import task, Parameter, Flow, mapped, unmapped
 from prefect.executors import LocalDaskExecutor
+from prefect import task, Parameter, Flow, mapped, unmapped
 
-from transform.data_load import tfrecord_writer
+from transform.tfrecords import tfrecord_writer
 
 
 @task
