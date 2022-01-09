@@ -1,1 +1,2 @@
 model_instances/model/** filter=lfs diff=lfs merge=lfs -text
+tabby2tortie_demo.png filter=lfs diff=lfs merge=lfs -text
