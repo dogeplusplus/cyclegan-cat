@@ -1,0 +1,4 @@
+[core]
+    remote = gdrive
+['remote "gdrive"']
+    url = gdrive://1w5NbF9s2Fuf3wuAMKsPKOx_9Prr-c8So/cyclegan-cat
